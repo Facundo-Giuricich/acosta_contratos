@@ -1,0 +1,8 @@
+env/
+__pycache__/
+pruebas/salida/
+generados/
+tramites/
+registros/
+base_vectorial/
+.adk/

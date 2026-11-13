@@ -1,0 +1,19 @@
+# Solo lo que el proyecto importa de verdad.
+# No se usan LangChain ni litellm (ver README, "Problemas que encontramos").
+
+# Word y plantillas
+python-docx==1.2.0
+docxtpl==0.20.2
+jinja2==3.1.6          # sandbox para completar la plantilla (generador.py)
+num2words==0.5.14      # numeros y montos en letras
+
+# Agente: ADK habla con Ollama con un conector propio (modelo_ollama.py)
+google-adk==2.14.0
+google-genai==2.34.0   # tipos de mensajes que usa ADK (agent.py, modelo_ollama.py)
+
+# RAG: embeddings con Ollama y base vectorial
+ollama==0.6.3
+chromadb==1.5.9
+
+# Exportar a PDF con Word por COM (si no hay Word se usa LibreOffice)
+pywin32==312; sys_platform == "win32"
