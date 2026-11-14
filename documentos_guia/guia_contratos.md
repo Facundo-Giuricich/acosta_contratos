@@ -92,6 +92,41 @@ El preaviso es la cantidad de días de anticipación con la que una parte tiene 
 
 Indica qué tribunales intervienen si hay un conflicto entre las partes. Se escribe con la forma "la ciudad de Rosario, Provincia de Santa Fe". Normalmente es la ciudad donde se firma o donde tiene domicilio la contratante. Si las partes son de provincias distintas y no se ponen de acuerdo, consultar con el abogado.
 
+## Expediente Jurídico (apertura)
+
+El expediente es el documento interno con el que el estudio abre un caso nuevo: un reclamo, una consulta o un conflicto de un cliente. No es un contrato: no lo firman las partes, sirve para ordenar la información del caso. Se pide cuando el cliente trae un problema, por ejemplo un incumplimiento, una deuda o un daño.
+
+Si el empleado no sabe si necesita un contrato o un expediente: el contrato es para un acuerdo nuevo entre dos partes; el expediente es para un caso o reclamo que el estudio va a llevar.
+
+### Datos de identificación del expediente
+
+- Número de expediente: tiene la forma EXP-AAAA-NNNN, por ejemplo EXP-2026-0147. Lo asigna mesa de entradas.
+- Fecha de apertura: el día en que se abre el expediente.
+- Tipo de expediente: qué clase de caso es, por ejemplo "Reclamo por incumplimiento contractual" o "Consulta laboral".
+- Área responsable: el área del estudio que lo lleva, por ejemplo Derecho Comercial, Laboral o Civil.
+- Profesional responsable: tiene que ser un abogado del estudio. La matrícula la completa el sistema solo.
+- Prioridad: Alta, Media o Baja. Si no está claro, preguntarle al abogado responsable.
+
+### La carátula
+
+La carátula es el nombre del expediente. El sistema la arma solo con la forma "Cliente c/ Contraparte s/ materia", por ejemplo "Distribuidora del Litoral S.R.L. c/ Transportes Río Paraná S.A. s/ incumplimiento de contrato de transporte". "c/" significa "contra" y "s/" significa "sobre". El empleado solo carga la materia, es decir de qué se trata el caso.
+
+### Partes del expediente
+
+- Parte solicitante: es el cliente del estudio. Se piden nombre o razón social, DNI o CUIT, domicilio, correo electrónico y teléfono.
+- Contraparte: es la otra parte del conflicto. Se piden nombre o razón social, DNI o CUIT y domicilio. Si hay información adicional (por ejemplo quién la representa), se puede agregar.
+
+### Antecedentes y documentación
+
+- Antecedentes: qué pasó, contado de forma breve y en orden.
+- Fecha del hecho principal: cuándo pasó lo más importante. No puede ser posterior a la apertura del expediente.
+- Origen de la solicitud: cómo llegó el caso al estudio, quién consultó y cuándo.
+- Documentación inicial: los papeles que trajo el cliente (contratos, remitos, correos, cartas documento).
+
+### Datos opcionales del expediente
+
+Las observaciones, la información y la documentación pendiente, las próximas acciones y el resumen de la situación se pueden dejar vacíos al abrir el expediente: en el documento quedan con una raya (—). Las conclusiones las escribe siempre el abogado responsable, nunca el empleado.
+
 ## Preguntas frecuentes
 
 ### ¿Qué hago si el cliente quiere agregar o cambiar una cláusula?
