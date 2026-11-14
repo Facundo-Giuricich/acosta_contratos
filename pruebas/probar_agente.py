@@ -39,6 +39,30 @@ CONVERSACIONES = {
 
         "Sí, los datos están bien, generalo.",
     ],
+    "expediente": [
+        "Hola, hay que abrir un expediente nuevo. Es el EXP-2026-0147, abierto el "
+        "12/02/2026, un reclamo por incumplimiento contractual del área de Derecho "
+        "Comercial. La responsable es la Dra. Valeria Acosta y la prioridad es alta.",
+
+        "El cliente es Distribuidora del Litoral S.R.L., CUIT 30-71234567-1, Av. San "
+        "Martín 1250, Rosario, Santa Fe, correo legales@distribuidora.com.ar, teléfono "
+        "+54 341 555-0142. La contraparte es Transportes Río Paraná S.A., CUIT "
+        "30-70987654-2, con domicilio en Ruta Nacional 11 km 12, Santa Fe, Santa Fe.",
+
+        "La materia es incumplimiento de contrato de transporte. El objeto es el reclamo "
+        "por daños y perjuicios por el incumplimiento de los plazos de entrega. "
+        "Descripción: la empresa contrató transporte de mercaderías y entre octubre y "
+        "diciembre de 2025 hubo demoras y pérdida de carga. Antecedentes: en marzo de "
+        "2025 firmaron un contrato de transporte con entregas en 48 horas y hubo 14 "
+        "entregas fuera de plazo. El hecho principal fue el 18/11/2025. La consulta la "
+        "presentó la gerencia el 05/02/2026. Trajeron el contrato de transporte, los "
+        "remitos y la carta documento.",
+
+        "Sí, está todo bien, generalo.",
+    ],
+    "elegir_tipo": [
+        "Necesito preparar un documento para un cliente nuevo.",
+    ],
     "errores": [
         "Necesito un contrato de servicios. La contratante es Agro Sur S.A., CUIT 30-71234567-8. "
         "El contrato dura 3 meses, desde el 01/05/2026 hasta el 31/12/2026.",

@@ -56,9 +56,82 @@ def tipo_documento(documento):
     return "DNI"
 
 
-def armar_datos_plantilla(datos):
-    # recibe los datos del contrato y devuelve todo lo que necesita la plantilla
+def armar_datos_plantilla(datos, tipo="contrato_servicios"):
+    # recibe los datos del documento y devuelve todo lo que necesita su plantilla
     # (algunos van tal cual y otros se calculan)
+    if tipo == "expediente_juridico":
+        return datos_expediente(datos)
+    return datos_contrato_servicios(datos)
+
+
+# lo que va en un campo opcional que no se completo
+SIN_DATO = "—"
+
+
+def datos_expediente(datos):
+    # import aca adentro para no crear una importacion circular
+    from agente_contratos.campos import ABOGADOS
+    from agente_contratos.validacion import buscar_abogado
+
+    def opcional(campo):
+        return datos.get(campo) or SIN_DATO
+
+    profesional = datos["profesional_responsable"]
+    matricula = ABOGADOS[buscar_abogado(profesional)]["matricula"]
+    apertura = datos["fecha_apertura"]
+
+    return {
+        # 1. identificacion
+        "numero_expediente": datos["numero_expediente"],
+        "fecha_apertura_texto": fecha_en_texto(apertura),
+        "tipo_expediente": datos["tipo_expediente"],
+        "area_responsable": datos["area_responsable"],
+        "profesional": profesional,
+        "estado": "En trámite",  # un expediente nuevo siempre arranca asi
+        "prioridad": datos["prioridad"],
+        # 2. caratula: la arma el codigo con el formato de siempre
+        #    "Cliente c/ Contraparte s/ materia"
+        "caratula": (
+            datos["solicitante_nombre"] + " c/ " + datos["contraparte_nombre"]
+            + " s/ " + datos["materia"]
+        ),
+        "objeto": datos["objeto"],
+        "descripcion": datos["descripcion"],
+        # 3. partes
+        "solicitante_nombre": datos["solicitante_nombre"],
+        "solicitante_documento": datos["solicitante_documento"],
+        "solicitante_domicilio": datos["solicitante_domicilio"],
+        "solicitante_email": datos["solicitante_email"],
+        "solicitante_telefono": datos["solicitante_telefono"],
+        "contraparte_nombre": datos["contraparte_nombre"],
+        "contraparte_documento": datos["contraparte_documento"],
+        "contraparte_domicilio": datos["contraparte_domicilio"],
+        "contraparte_informacion": opcional("contraparte_informacion"),
+        # la matricula sale de la lista de abogados, no de lo que se escribio
+        "matricula": matricula,
+        "representacion_observaciones": opcional("representacion_observaciones"),
+        # 4. antecedentes
+        "antecedentes": datos["antecedentes"],
+        "fecha_hecho_texto": fecha_en_texto(datos["fecha_hecho"]),
+        "origen_solicitud": datos["origen_solicitud"],
+        "documentacion_inicial": datos["documentacion_inicial"],
+        # 5. primera actuacion: la apertura
+        "actuacion_fecha": apertura.strftime("%d/%m/%Y"),
+        "actuacion_detalle": "Apertura del expediente",
+        "actuacion_observaciones": SIN_DATO,
+        # 7. observaciones y pendientes
+        "observaciones_generales": opcional("observaciones_generales"),
+        "informacion_pendiente": opcional("informacion_pendiente"),
+        "documentacion_pendiente": opcional("documentacion_pendiente"),
+        "proximas_acciones": opcional("proximas_acciones"),
+        # 8. estado y conclusiones: las conclusiones son del abogado, no del empleado
+        "resumen_situacion": opcional("resumen_situacion"),
+        "conclusiones": "A completar por el profesional responsable.",
+        "fecha_actualizacion_texto": fecha_en_texto(apertura),
+    }
+
+
+def datos_contrato_servicios(datos):
     fecha = datos["fecha_contrato"]
 
     valores = {

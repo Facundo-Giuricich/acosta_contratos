@@ -77,10 +77,10 @@ def tramite_actual(tool_context):
 
 
 def listar_contratos() -> dict:
-    """Devuelve los tipos de contrato que el sistema puede generar.
+    """Devuelve los tipos de documento (contratos y expedientes) que el sistema puede generar.
 
     Returns:
-        Lista de contratos disponibles con su tipo y nombre.
+        Lista de documentos disponibles con su tipo y nombre.
     """
     disponibles = []
     for tipo, info in CONTRATOS.items():
@@ -89,14 +89,14 @@ def listar_contratos() -> dict:
 
 
 def iniciar_contrato(tipo: str, tool_context: ToolContext, datos: dict = None) -> dict:
-    """Empieza un contrato nuevo. Usala cuando el empleado pide un contrato.
-    Si el empleado ya dio datos en su mensaje, pasalos en "datos" asi se guardan
-    en el mismo paso.
+    """Empieza un documento nuevo. Usala cuando el empleado pide un contrato o
+    abrir un expediente. Si el empleado ya dio datos en su mensaje, pasalos en
+    "datos" asi se guardan en el mismo paso.
 
     Args:
-        tipo: Tipo de contrato, por ejemplo "contrato_servicios".
+        tipo: Tipo de documento: "contrato_servicios" o "expediente_juridico".
         datos: (opcional) Datos que el empleado ya dio, con los nombres de campo
-            del contrato. Fechas DD/MM/AAAA y montos solo con numeros.
+            del documento. Fechas DD/MM/AAAA y montos solo con numeros.
 
     Returns:
         El numero de tramite, lo que se guardo y la lista de datos que faltan.
@@ -105,7 +105,7 @@ def iniciar_contrato(tipo: str, tool_context: ToolContext, datos: dict = None) -
     if tramite is None:
         return {
             "estado": "error",
-            "mensaje": f"No existe el contrato '{tipo}'. Los disponibles son: {list(CONTRATOS)}",
+            "mensaje": f"No existe el documento '{tipo}'. Los disponibles son: {list(CONTRATOS)}",
         }
 
     tool_context.state["id_tramite"] = tramite["id"]
@@ -184,6 +184,12 @@ def cargar_datos(datos: dict, tool_context: ToolContext) -> dict:
             + " | ".join(f"{i}) {p}" for i, p in enumerate(problemas, 1))
             + ". Después pedile los datos que faltan."
         )
+    elif revision["faltantes"]:
+        # le digo cuales faltan con su descripcion: si solo le digo "pedile
+        # los que faltan", el modelo chico a veces no los nombra
+        faltan = [re.sub(r"^\w+ \((.*)\)$", r"\1", f) for f in revision["faltantes"]]
+        mensaje = ("Decile al empleado que todavía faltan estos datos y pedíselos: "
+                   + "; ".join(faltan) + ".")
     else:
         mensaje = "Si faltan datos, pedíselos al empleado."
 
@@ -239,7 +245,7 @@ def ver_resumen(tool_context: ToolContext) -> dict:
 
 
 def generar_borrador(tool_context: ToolContext) -> dict:
-    """Genera el BORRADOR del contrato con la plantilla aprobada del estudio.
+    """Genera el BORRADOR del documento (contrato o expediente) con la plantilla aprobada del estudio.
     Solo funciona si estan todos los datos y no hay errores.
     Usala solo despues de que el empleado confirmo que los datos estan bien.
 
@@ -292,11 +298,13 @@ def generar_borrador(tool_context: ToolContext) -> dict:
 
     return {
         "estado": "ok",
-        "archivo": str(ruta),
+        "archivo": ruta.name,
         "advertencias": revision["advertencias"],
         "mensaje": (
-            "Se generó un BORRADOR. No es un contrato válido todavía: "
-            "lo tiene que revisar y aprobar un abogado del estudio."
+            "Se generó un BORRADOR. Decile al empleado que lo puede descargar con "
+            "el botón 'Descargar borrador' que aparece al costado, y que no es un "
+            "documento válido todavía: lo tiene que revisar y aprobar un abogado "
+            "del estudio. No escribas la ruta del archivo."
         ),
     }
 

@@ -182,7 +182,7 @@ def generar_borrador(tramite):
     ruta = CARPETA_BORRADORES / f"{tramite['id']}_borrador.docx"
 
     try:
-        generar_contrato(datos, ruta)
+        generar_contrato(datos, ruta, tramite["tipo"])
     except ValueError as error:
         revision["errores"].append(str(error))
         revision["listo_para_generar"] = False

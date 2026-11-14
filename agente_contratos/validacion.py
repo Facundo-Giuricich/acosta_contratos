@@ -4,9 +4,10 @@
 # Cada funcion devuelve (valor_limpio, error). Si error no es None, el dato se rechaza.
 
 import re
+import unicodedata
 from datetime import date, datetime, timedelta
 
-from agente_contratos.campos import CONTRATOS
+from agente_contratos.campos import ABOGADOS, CONTRATOS
 
 # caracteres que no tienen nada que hacer en un dato de un contrato
 # ({ } son los de las plantillas, < > los de codigo / html)
@@ -133,6 +134,71 @@ def validar_monto(valor):
     return monto, None
 
 
+def validar_email(valor):
+    valor = str(valor).strip().lower()
+    if not re.fullmatch(r"[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}", valor) or len(valor) > 100:
+        return None, "no es un correo válido (ej: nombre@empresa.com)"
+    return valor, None
+
+
+def validar_telefono(valor):
+    valor = " ".join(str(valor).split())
+    # solo numeros, espacios, guiones, parentesis y el + del codigo de pais
+    if not re.fullmatch(r"\+?[\d\s\-()]+", valor):
+        return None, "tiene que tener solo números (ej: +54 341 555-0142)"
+    numeros = re.sub(r"\D", "", valor)
+    if len(numeros) < 8 or len(numeros) > 15:
+        return None, "un teléfono tiene entre 8 y 15 números"
+    return valor, None
+
+
+def validar_expediente(valor):
+    # EXP-2026-0147 (se acepta en minusculas o con espacios)
+    texto = re.sub(r"\s", "", str(valor)).upper()
+    encontrado = re.fullmatch(r"EXP-?(\d{4})-?(\d{1,4})", texto)
+    if not encontrado:
+        return None, "tiene que tener la forma EXP-AAAA-NNNN (ej: EXP-2026-0147)"
+    anio, numero = encontrado.groups()
+    return f"EXP-{anio}-{int(numero):04d}", None
+
+
+def validar_prioridad(valor):
+    texto = str(valor).strip().lower()
+    for opcion in ["Alta", "Media", "Baja"]:
+        if texto == opcion.lower():
+            return opcion, None
+    return None, "tiene que ser Alta, Media o Baja"
+
+
+def normalizar_nombre(nombre):
+    # "Dra. Valeria Acosta" -> "valeria acosta"
+    # (sin mayusculas, sin acentos y sin "Dr." / "Dra.")
+    nombre = unicodedata.normalize("NFKD", str(nombre))
+    nombre = "".join(c for c in nombre if not unicodedata.combining(c)).lower()
+    nombre = re.sub(r"\bdra?\b\.?", " ", nombre)
+    nombre = re.sub(r"[^a-z\s]", " ", nombre)
+    return " ".join(nombre.split())
+
+
+def buscar_abogado(nombre):
+    # devuelve la matricula del abogado con ese nombre, o None
+    for matricula, abogado in ABOGADOS.items():
+        if normalizar_nombre(nombre) == normalizar_nombre(abogado["nombre"]):
+            return matricula
+    return None
+
+
+def validar_abogado(valor):
+    # el responsable tiene que ser un abogado del estudio. Se guarda el
+    # nombre oficial (asi la matricula del expediente sale de la lista y
+    # no de lo que escribio alguien)
+    matricula = buscar_abogado(valor)
+    if matricula is None:
+        nombres = ", ".join(a["nombre"] for a in ABOGADOS.values())
+        return None, f"no es un abogado del estudio (los abogados son: {nombres})"
+    return ABOGADOS[matricula]["nombre"], None
+
+
 def validar_campo(tipo_contrato, campo, valor):
     campos = CONTRATOS[tipo_contrato]["campos"]
     if campo not in campos:
@@ -153,14 +219,26 @@ def validar_campo(tipo_contrato, campo, valor):
         return validar_numero(valor, 1, 180)
     if tipo == "monto":
         return validar_monto(valor)
+    if tipo == "email":
+        return validar_email(valor)
+    if tipo == "telefono":
+        return validar_telefono(valor)
+    if tipo == "expediente":
+        return validar_expediente(valor)
+    if tipo == "prioridad":
+        return validar_prioridad(valor)
+    if tipo == "abogado":
+        return validar_abogado(valor)
     return None, "tipo de dato desconocido"
 
 
 def campos_faltantes(tipo_contrato, datos):
     # devuelve los campos obligatorios que todavia no se cargaron
+    # (los opcionales se pueden dejar vacios)
+    opcionales = CONTRATOS[tipo_contrato].get("opcionales", [])
     faltan = []
     for campo in CONTRATOS[tipo_contrato]["campos"]:
-        if campo not in datos:
+        if campo not in datos and campo not in opcionales:
             faltan.append(campo)
     return faltan
 
@@ -210,5 +288,18 @@ def revisar_consistencia(datos):
     if "contratante_documento" in datos and "prestador_documento" in datos:
         if datos["contratante_documento"] == datos["prestador_documento"]:
             errores.append("La contratante y el prestador tienen el mismo documento.")
+
+    # expediente: el hecho no puede ser posterior a la apertura
+    if "fecha_hecho" in datos and "fecha_apertura" in datos:
+        if datos["fecha_hecho"] > datos["fecha_apertura"]:
+            errores.append("La fecha del hecho no puede ser posterior a la apertura del expediente.")
+
+    if "solicitante_documento" in datos and "contraparte_documento" in datos:
+        if datos["solicitante_documento"] == datos["contraparte_documento"]:
+            errores.append("El cliente y la contraparte tienen el mismo documento.")
+
+    if "solicitante_nombre" in datos and "contraparte_nombre" in datos:
+        if normalizar_nombre(datos["solicitante_nombre"]) == normalizar_nombre(datos["contraparte_nombre"]):
+            errores.append("El cliente y la contraparte tienen el mismo nombre.")
 
     return errores, advertencias

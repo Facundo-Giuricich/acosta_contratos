@@ -10,23 +10,20 @@
 import hashlib
 import re
 import subprocess
-import unicodedata
 import sys
 from pathlib import Path
 
 from agente_contratos import tramites
-from agente_contratos.campos import CONTRATOS
+from agente_contratos.campos import ABOGADOS, CONTRATOS
 from agente_contratos.generador import generar_contrato
+from agente_contratos.validacion import normalizar_nombre
 
 CARPETA = Path(__file__).resolve().parent
 CARPETA_APROBADOS = CARPETA / "generados" / "aprobados"
 
-# Abogados que pueden aprobar (matricula -> nombre).
+# Abogados que pueden aprobar (matricula -> nombre). La lista esta en campos.py.
 # En un sistema real esto saldria de un login con usuario y contraseña.
-ABOGADOS_AUTORIZADOS = {
-    "T12F345": "Dra. Valeria Acosta",
-    "T15F210": "Dr. Tomás Ledesma",
-}
+ABOGADOS_AUTORIZADOS = {matricula: a["nombre"] for matricula, a in ABOGADOS.items()}
 
 
 def normalizar_matricula(matricula):
@@ -34,14 +31,10 @@ def normalizar_matricula(matricula):
     return re.sub(r"[^A-Za-z0-9]", "", matricula).upper()
 
 
-def normalizar_nombre(nombre):
-    # "Dra. Valeria Acosta" -> "valeria acosta"
-    # (sin mayusculas, sin acentos y sin "Dr." / "Dra.")
-    nombre = unicodedata.normalize("NFKD", nombre)
-    nombre = "".join(c for c in nombre if not unicodedata.combining(c)).lower()
-    nombre = re.sub(r"\bdra?\b\.?", " ", nombre)
-    nombre = re.sub(r"[^a-z\s]", " ", nombre)
-    return " ".join(nombre.split())
+def nombre_del_tramite(tramite):
+    # el dato que identifica el tramite en los listados (cliente o contratante)
+    campo = CONTRATOS[tramite["tipo"]].get("campo_principal", "")
+    return tramite["datos"].get(campo, "?")
 
 
 def huella(ruta):
@@ -155,7 +148,7 @@ def aprobar_tramite(id_tramite, nombre, matricula):
     datos, _ = tramites.datos_validados(tramite)
     ruta_docx = CARPETA_APROBADOS / f"{tramite['id']}_aprobado.docx"
     try:
-        generar_contrato(datos, ruta_docx)
+        generar_contrato(datos, ruta_docx, tramite["tipo"])
     except ValueError as error:
         return False, str(error)
 
@@ -170,10 +163,10 @@ def aprobar_tramite(id_tramite, nombre, matricula):
         "huella_docx": huella(ruta_docx),
         "pdf": ruta_pdf.name if ruta_pdf else None,
     }
-    tramites.anotar(tramite, "contrato aprobado", f"por {nombre.strip()} (mat. {matricula})")
+    tramites.anotar(tramite, "documento aprobado", f"por {nombre.strip()} (mat. {matricula})")
     tramites.guardar_tramite(tramite)
 
-    mensaje = f"Contrato aprobado. Word: {ruta_docx}"
+    mensaje = f"Documento aprobado. Word: {ruta_docx}"
     if ruta_pdf:
         mensaje += f"\nPDF: {ruta_pdf}"
     else:
@@ -203,8 +196,9 @@ def main():
         if not pendientes:
             print("No hay borradores pendientes de aprobación.")
         for tramite in pendientes:
-            nombre = tramite["datos"].get("contratante_nombre", "?")
-            print(f"{tramite['id']}  |  {nombre}  |  borrador del {tramite['borrador']['fecha']}")
+            tipo = CONTRATOS[tramite["tipo"]]["nombre"]
+            print(f"{tramite['id']}  |  {tipo}  |  {nombre_del_tramite(tramite)}  |  "
+                  f"borrador del {tramite['borrador']['fecha']}")
         print("\nPara revisar uno: aprobar.py NUMERO_DE_TRAMITE")
         return
 

@@ -82,8 +82,16 @@ def dato_aparece(tipo_dato, valor, texto_empleado):
     if tipo_dato in ("meses", "dias", "monto"):
         solo_numeros = re.sub(r"\D", "", str(valor))
         return bool(solo_numeros) and numero_aparece(int(solo_numeros), texto_empleado)
-    if tipo_dato in ("documento", "dni"):
+    if tipo_dato in ("documento", "dni", "telefono", "expediente", "email"):
         return normalizar(valor) in normalizar(texto_empleado)
+    if tipo_dato == "abogado":
+        # "Valeria Acosta" o "Dra. Valeria Acosta": comparo sin el "Dr./Dra."
+        from agente_contratos.validacion import normalizar_nombre
+        nombre = normalizar(normalizar_nombre(valor))
+        return bool(nombre) and nombre in normalizar(texto_empleado)
+    if tipo_dato == "prioridad":
+        # tiene que estar como palabra suelta ("alta", no "altamente")
+        return normalizar(valor) in palabras(texto_empleado)
     return texto_aparece(valor, texto_empleado, largo=(tipo_dato == "texto_largo"))
 
 
