@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revisión de documentos · Acosta & Asociados</title>
+<style>
+  :root {
+    --fondo: #f5f3ef; --panel: #ffffff; --texto: #1f2328; --suave: #5f6670;
+    --borde: #e2ddd5; --marca: #1f3a5f; --marca-texto: #ffffff;
+    --aviso: #8a5a00; --aviso-fondo: #fff4dc; --ok: #1d6b3a; --ok-fondo: #e3f3e8;
+    --error: #a1261b; --error-fondo: #fbe5e2; --activo: #eef2f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #15181c; --panel: #1d2127; --texto: #e6e8eb; --suave: #9aa3ad;
+      --borde: #2e343c; --marca: #9cc0ea; --marca-texto: #10161d;
+      --aviso: #f0c46b; --aviso-fondo: #33290f; --ok: #7fd49c; --ok-fondo: #15301f;
+      --error: #f19a90; --error-fondo: #3a1714; --activo: #252b33;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto);
+         font: 16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--borde); background: var(--panel);
+           display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  header h1 { margin: 0; font-size: 22px; color: var(--marca); }
+  header span { color: var(--suave); font-size: 14px; }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px;
+         max-width: 1200px; margin: 0 auto; }
+  section { background: var(--panel); border: 1px solid var(--borde); border-radius: 10px; padding: 16px; }
+  h2 { margin: 0 0 10px; font-size: 20px; }
+  h3 { margin: 18px 0 8px; font-size: 15px; }
+  .item { display: block; width: 100%; text-align: left; padding: 10px; margin-bottom: 6px; border-radius: 8px;
+          border: 1px solid var(--borde); background: transparent; color: var(--texto); font: inherit; cursor: pointer; }
+  .item:hover, .item.activo { background: var(--activo); }
+  .item small { display: block; color: var(--suave); }
+  .vacio { color: var(--suave); font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+  td:first-child { color: var(--suave); width: 38%; }
+  .aviso { background: var(--aviso-fondo); color: var(--aviso); padding: 8px 10px; border-radius: 8px; margin: 6px 0; font-size: 14px; }
+  .ok { background: var(--ok-fondo); color: var(--ok); padding: 8px 10px; border-radius: 8px; margin: 8px 0; }
+  .error { background: var(--error-fondo); color: var(--error); padding: 8px 10px; border-radius: 8px; margin: 8px 0; }
+  .enlace { display: inline-block; margin: 4px 8px 4px 0; padding: 8px 12px; border-radius: 8px;
+            background: var(--ok-fondo); color: var(--ok); font-weight: 600; text-decoration: none; font-size: 14px; }
+  .acciones { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px; }
+  fieldset { border: 1px solid var(--borde); border-radius: 8px; padding: 12px; margin: 0; }
+  legend { font-weight: 600; padding: 0 4px; }
+  label { display: block; font-size: 14px; color: var(--suave); margin-top: 8px; }
+  input, textarea { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--borde);
+                    background: var(--fondo); color: var(--texto); font: inherit; }
+  textarea { height: 70px; resize: vertical; }
+  button.accion { margin-top: 10px; padding: 8px 16px; border: 0; border-radius: 8px; font: inherit;
+                  font-weight: 600; cursor: pointer; background: var(--marca); color: var(--marca-texto); }
+  button.secundario { background: transparent; color: var(--texto); border: 1px solid var(--borde); }
+  button:disabled { opacity: .5; cursor: wait; }
+  .historial { font-size: 13px; color: var(--suave); padding-left: 18px; }
+  @media (max-width: 800px) {
+    main, .acciones { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Acosta &amp; Asociados</h1>
+  <span>Revisión y aprobación de documentos (abogados)</span>
+</header>
+<main>
+  <section>
+    <h2>Pendientes de aprobación</h2>
+    <div id="pendientes"><p class="vacio">Cargando…</p></div>
+    <h3>Aprobados recientes</h3>
+    <div id="aprobados"></div>
+  </section>
+  <section id="detalle">
+    <p class="vacio">Elegí un documento de la lista para revisarlo.</p>
+  </section>
+</main>
+<script>
+  function escapar(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  function enlacesHtml(e) {
+    let html = "";
+    if (e.borrador) html += `<a class="enlace" href="${e.borrador}">Borrador (Word)</a>`;
+    if (e.word) html += `<a class="enlace" href="${e.word}">Aprobado (Word)</a>`;
+    if (e.pdf) html += `<a class="enlace" href="${e.pdf}">Aprobado (PDF)</a>`;
+    return html;
+  }
+
+  async function cargarLista() {
+    const r = await fetch("/api/pendientes");
+    const datos = await r.json();
+    const fila = t => `<button class="item" data-id="${escapar(t.id)}">
+        <b>${escapar(t.cliente)}</b><small>${escapar(t.documento)}</small>
+        <small>${escapar(t.id)} · ${escapar(t.fecha || "")}${t.aprobado_por ? " · " + escapar(t.aprobado_por) : ""}</small>
+      </button>`;
+    document.getElementById("pendientes").innerHTML = datos.pendientes.length
+      ? datos.pendientes.map(fila).join("") : `<p class="vacio">No hay documentos pendientes.</p>`;
+    document.getElementById("aprobados").innerHTML = datos.aprobados.length
+      ? datos.aprobados.map(fila).join("") : `<p class="vacio">Todavía no hay documentos aprobados.</p>`;
+    document.querySelectorAll(".item").forEach(b => b.addEventListener("click", () => abrir(b.dataset.id)));
+  }
+
+  async function abrir(id) {
+    document.querySelectorAll(".item").forEach(b => b.classList.toggle("activo", b.dataset.id === id));
+    const r = await fetch("/api/tramite/" + encodeURIComponent(id));
+    const t = await r.json();
+    let html = `<h2>${escapar(t.documento)}</h2>
+      <p style="color:var(--suave);margin:0 0 10px">N.º ${escapar(t.id)} · ${escapar(t.estado)} ·
+        cargado por ${escapar(t.creado_por)} el ${escapar(t.creado)}</p>
+      <div>${enlacesHtml(t.enlaces)}</div>`;
+    t.advertencias.forEach(a => html += `<div class="aviso">Advertencia: ${escapar(a)}</div>`);
+    html += `<h3>Datos</h3><table>` +
+      t.datos.map(d => `<tr><td>${escapar(d.dato)}</td><td>${escapar(d.valor)}</td></tr>`).join("") +
+      `</table>`;
+    if (t.pendiente) {
+      html += `<h3>Decisión</h3>
+        <p style="font-size:14px;color:var(--suave)">Revisá el borrador en Word antes de decidir.
+          La versión final se genera de nuevo desde los datos y la plantilla aprobada.</p>
+        <div id="resultado"></div>
+        <div class="acciones">
+          <fieldset>
+            <legend>Aprobar</legend>
+            <label>Nombre del abogado<input id="a-nombre" autocomplete="name"></label>
+            <label>Matrícula (ej: T.º 12 F.º 345)<input id="a-matricula"></label>
+            <button class="accion" id="b-aprobar">Aprobar y generar Word y PDF</button>
+          </fieldset>
+          <fieldset>
+            <legend>Devolver con observación</legend>
+            <label>Nombre del abogado<input id="o-nombre" autocomplete="name"></label>
+            <label>Motivo<textarea id="o-motivo"></textarea></label>
+            <button class="accion secundario" id="b-observar">Devolver al empleado</button>
+          </fieldset>
+        </div>`;
+    }
+    html += `<h3>Historial</h3><ul class="historial">` +
+      t.historial.map(h => `<li>${escapar(h.fecha)} · ${escapar(h.accion)} ${escapar(h.detalle)}</li>`).join("") +
+      `</ul>`;
+    document.getElementById("detalle").innerHTML = html;
+    if (t.pendiente) {
+      document.getElementById("b-aprobar").addEventListener("click", () => decidir(t.id, "aprobar"));
+      document.getElementById("b-observar").addEventListener("click", () => decidir(t.id, "observar"));
+    }
+  }
+
+  async function decidir(id, accion) {
+    const cuerpo = accion === "aprobar"
+      ? {id, nombre: document.getElementById("a-nombre").value, matricula: document.getElementById("a-matricula").value}
+      : {id, nombre: document.getElementById("o-nombre").value, motivo: document.getElementById("o-motivo").value};
+    document.querySelectorAll("button.accion").forEach(b => b.disabled = true);
+    const resultado = document.getElementById("resultado");
+    resultado.innerHTML = `<div class="aviso">Procesando… (generar el PDF puede tardar unos segundos)</div>`;
+    try {
+      const r = await fetch("/api/" + accion, {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cuerpo),
+      });
+      const datos = await r.json();
+      if (datos.ok) {
+        await cargarLista();
+        await abrir(id);
+        document.getElementById("detalle").insertAdjacentHTML("afterbegin",
+          `<div class="ok">${escapar(datos.mensaje)}</div>`);
+      } else {
+        resultado.innerHTML = `<div class="error">${escapar(datos.mensaje || "No se pudo completar.")}</div>`;
+        document.querySelectorAll("button.accion").forEach(b => b.disabled = false);
+      }
+    } catch (error) {
+      resultado.innerHTML = `<div class="error">No me pude conectar con el sistema.</div>`;
+      document.querySelectorAll("button.accion").forEach(b => b.disabled = false);
+    }
+  }
+
+  cargarLista();
+</script>
+</body>
+</html>

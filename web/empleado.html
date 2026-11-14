@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asistente de documentos · Acosta & Asociados</title>
+<style>
+  :root {
+    --fondo: #f5f3ef; --panel: #ffffff; --texto: #1f2328; --suave: #5f6670;
+    --borde: #e2ddd5; --marca: #1f3a5f; --marca-texto: #ffffff;
+    --mio: #1f3a5f; --mio-texto: #ffffff; --suyo: #ffffff;
+    --aviso: #8a5a00; --aviso-fondo: #fff4dc; --ok: #1d6b3a; --ok-fondo: #e3f3e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #15181c; --panel: #1d2127; --texto: #e6e8eb; --suave: #9aa3ad;
+      --borde: #2e343c; --marca: #9cc0ea; --marca-texto: #10161d;
+      --mio: #2b4a72; --mio-texto: #ffffff; --suyo: #1d2127;
+      --aviso: #f0c46b; --aviso-fondo: #33290f; --ok: #7fd49c; --ok-fondo: #15301f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto);
+         font: 16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--borde); background: var(--panel);
+           display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  header h1 { margin: 0; font-size: 22px; color: var(--marca); }
+  header span { color: var(--suave); font-size: 14px; }
+  main { display: grid; grid-template-columns: 1fr 320px; gap: 16px; padding: 16px;
+         max-width: 1200px; margin: 0 auto; height: calc(100vh - 56px); }
+  #chat { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--borde);
+          border-radius: 10px; min-height: 0; }
+  #mensajes { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; white-space: normal; }
+  .msg.mio { align-self: flex-end; background: var(--mio); color: var(--mio-texto); }
+  .msg.suyo { align-self: flex-start; background: var(--suyo); border: 1px solid var(--borde); }
+  .msg ul { margin: 6px 0; padding-left: 20px; }
+  .pensando { color: var(--suave); font-style: italic; }
+  form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--borde); }
+  textarea { flex: 1; resize: none; height: 64px; padding: 10px; border-radius: 8px; font: inherit;
+             border: 1px solid var(--borde); background: var(--fondo); color: var(--texto); }
+  button { padding: 0 18px; border: 0; border-radius: 8px; background: var(--marca);
+           color: var(--marca-texto); font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  aside { background: var(--panel); border: 1px solid var(--borde); border-radius: 10px; padding: 16px;
+          overflow-y: auto; }
+  aside h2 { margin: 0 0 8px; font-size: 15px; }
+  aside p { margin: 6px 0; font-size: 14px; color: var(--suave); }
+  .barra { height: 8px; background: var(--fondo); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .barra div { height: 100%; background: var(--marca); width: 0; transition: width .3s; }
+  .faltan { font-size: 14px; padding-left: 18px; margin: 6px 0; }
+  .descarga { display: block; margin-top: 10px; padding: 10px; border-radius: 8px; text-align: center;
+              background: var(--ok-fondo); color: var(--ok); font-weight: 600; text-decoration: none; }
+  .aviso { background: var(--aviso-fondo); color: var(--aviso); padding: 8px 10px; border-radius: 8px;
+           font-size: 14px; margin-top: 8px; }
+  .ayuda li { margin-bottom: 4px; }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; height: auto; padding: 16px; }
+    #chat { height: 70vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Acosta &amp; Asociados</h1>
+  <span>Asistente para preparar contratos y expedientes</span>
+</header>
+<main>
+  <section id="chat">
+    <div id="mensajes">
+      <div class="msg suyo">Hola. Contame qué documento necesitás (un <b>contrato de prestación
+        de servicios</b> o abrir un <b>expediente</b>) y pasame los datos que tengas. Te voy a pedir
+        lo que falte y te aviso si algo está mal.</div>
+    </div>
+    <form id="formulario">
+      <textarea id="texto" placeholder="Escribí tu mensaje… (Enter para enviar, Shift+Enter para otra línea)"></textarea>
+      <button id="enviar" type="submit">Enviar</button>
+    </form>
+  </section>
+  <aside id="panel">
+    <h2>Trámite</h2>
+    <div id="tramite"><p>Todavía no empezaste ningún documento.</p></div>
+    <h2 style="margin-top:20px">Cómo funciona</h2>
+    <ol class="ayuda" style="font-size:14px;padding-left:18px;color:var(--suave)">
+      <li>Pedí el documento y pasá los datos.</li>
+      <li>Revisá el resumen y confirmá.</li>
+      <li>Se genera un <b>borrador</b> sin validez legal.</li>
+      <li>Un abogado lo revisa y lo aprueba.</li>
+    </ol>
+    <p>Cada respuesta puede tardar hasta un minuto.</p>
+  </aside>
+</main>
+<script>
+  let sesion = null;
+  const mensajes = document.getElementById("mensajes");
+  const texto = document.getElementById("texto");
+  const boton = document.getElementById("enviar");
+
+  function escapar(s) {
+    return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  // formato minimo: **negrita**, listas con "-" o "1." y saltos de linea
+  function formatear(s) {
+    const lineas = escapar(s).split("\n");
+    let html = "", enLista = false;
+    for (let linea of lineas) {
+      // los links que escriba el modelo se muestran como texto (las descargas
+      // van solo por los botones del costado)
+      linea = linea.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+      linea = linea.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+      const item = linea.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)/);
+      if (item) {
+        if (!enLista) { html += "<ul>"; enLista = true; }
+        html += "<li>" + item[1] + "</li>";
+      } else {
+        if (enLista) { html += "</ul>"; enLista = false; }
+        if (linea.trim()) html += linea + "<br>";
+      }
+    }
+    if (enLista) html += "</ul>";
+    return html.replace(/(<br>)+$/, "");
+  }
+
+  function agregar(contenido, clase) {
+    const div = document.createElement("div");
+    div.className = "msg " + clase;
+    div.innerHTML = clase === "mio" ? escapar(contenido).replace(/\n/g, "<br>") : formatear(contenido);
+    mensajes.appendChild(div);
+    mensajes.scrollTop = mensajes.scrollHeight;
+    return div;
+  }
+
+  function mostrarTramite(t) {
+    const caja = document.getElementById("tramite");
+    if (!t) return;
+    const porcentaje = Math.round(100 * t.cargados / t.obligatorios);
+    let html = `<p><b>${escapar(t.documento)}</b></p>
+      <p>N.º ${escapar(t.id)}<br>${escapar(t.estado)}</p>
+      <div class="barra"><div style="width:${porcentaje}%"></div></div>
+      <p>${t.cargados} de ${t.obligatorios} datos obligatorios</p>`;
+    if (t.faltan.length) {
+      html += `<p>Faltan:</p><ul class="faltan">` +
+        t.faltan.map(f => `<li>${escapar(f)}</li>`).join("") + `</ul>`;
+    }
+    if (t.observaciones) html += `<div class="aviso">Observación del abogado: ${escapar(t.observaciones)}</div>`;
+    const e = t.enlaces || {};
+    if (e.borrador) html += `<a class="descarga" href="${e.borrador}">Descargar borrador (Word)</a>
+      <div class="aviso">Es un borrador: no se puede usar hasta que lo apruebe un abogado.</div>`;
+    if (e.word) html += `<a class="descarga" href="${e.word}">Descargar versión aprobada (Word)</a>`;
+    if (e.pdf) html += `<a class="descarga" href="${e.pdf}">Descargar versión aprobada (PDF)</a>`;
+    caja.innerHTML = html;
+  }
+
+  async function enviar(e) {
+    e.preventDefault();
+    const mensaje = texto.value.trim();
+    if (!mensaje) return;
+    agregar(mensaje, "mio");
+    texto.value = "";
+    boton.disabled = true; texto.disabled = true;
+    const espera = agregar("El asistente está pensando…", "suyo");
+    espera.classList.add("pensando");
+    try {
+      const r = await fetch("/api/mensaje", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({sesion, texto: mensaje}),
+      });
+      const datos = await r.json();
+      espera.remove();
+      if (!r.ok) { agregar(datos.detail || "Hubo un problema, probá de nuevo.", "suyo"); return; }
+      sesion = datos.sesion;
+      datos.respuestas.forEach(t => agregar(t, "suyo"));
+      mostrarTramite(datos.tramite);
+    } catch (error) {
+      espera.remove();
+      agregar("No me pude conectar con el sistema. Revisá que el portal siga abierto.", "suyo");
+    } finally {
+      boton.disabled = false; texto.disabled = false; texto.focus();
+    }
+  }
+
+  document.getElementById("formulario").addEventListener("submit", enviar);
+  texto.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); boton.click(); }
+  });
+  texto.focus();
+</script>
+</body>
+</html>
