@@ -55,7 +55,7 @@ SIN_CLAVE = credencial("T.º 12 F.º 345", "")
 
 
 def desbloquear():
-    portal.BLOQUEO.update(fallidos=0, hasta=0.0)
+    portal.BLOQUEO.clear()
 
 
 def borrador_nuevo():
@@ -114,7 +114,22 @@ print("3) Bloqueo después de 5 intentos fallidos")
 for _ in range(5):
     cliente.get("/api/pendientes", headers=CLAVE_MAL)
 r = cliente.get("/api/pendientes", headers=ACOSTA)
-control("con la clave correcta igual queda bloqueado -> 429", r.status_code == 429, f"({r.status_code})")
+control("con la clave correcta igual queda bloqueada -> 429", r.status_code == 429, f"({r.status_code})")
+r = cliente.get("/api/pendientes", headers=credencial("T12F345", "acosta2026"))
+control("escribiendo la matrícula de otra forma sigue bloqueada -> 429", r.status_code == 429)
+r = cliente.get("/api/pendientes", headers=LEDESMA)
+control("bloquear a la Dra. Acosta no impide que entre el Dr. Ledesma", r.status_code == 200,
+        f"({r.status_code})")
+desbloquear()
+for i in range(5):
+    cliente.get("/api/pendientes", headers=credencial(f"T.º 9{i} F.º 1", "x"))
+r = cliente.get("/api/pendientes", headers=credencial("T.º 99 F.º 7", "x"))
+control("5 matrículas al azar distintas bloquean el contador general -> 429",
+        r.status_code == 429, f"({r.status_code})")
+r = cliente.get("/api/pendientes", headers={"Authorization": "Basic ###"})
+control("credenciales mal armadas cuentan en el general -> 429", r.status_code == 429)
+control("las matrículas al azar no bloquean a la Dra. Acosta",
+        cliente.get("/api/pendientes", headers=ACOSTA).status_code == 200)
 desbloquear()
 control("pasado el bloqueo, entra", cliente.get("/api/pendientes", headers=ACOSTA).status_code == 200)
 for _ in range(4):
@@ -163,12 +178,22 @@ control("el mensaje no muestra la ruta de la computadora",
 control("queda aprobado con su nombre",
         tramites.cargar_tramite(id1)["aprobacion"]["abogado"] == "Dra. Valeria Acosta")
 control("queda el Word aprobado para descargar", "word" in r["enlaces"])
-if "word" in r["enlaces"]:
-    control("aprobado sin credenciales -> 401", cliente.get(r["enlaces"]["word"]).status_code == 401)
-    control("aprobado con la sesión del empleado -> 401",
-            cliente.get(r["enlaces"]["word"], headers={"X-Sesion": sesion_propia}).status_code == 401)
-    control("el abogado descarga el Word aprobado",
-            cliente.get(r["enlaces"]["word"], headers=ACOSTA).status_code == 200)
+for formato in ["word", "pdf"]:
+    if formato not in r["enlaces"]:
+        if formato == "pdf":
+            print("  (no se generó el PDF en esta computadora: se prueba solo el Word)")
+        continue
+    url = r["enlaces"][formato]
+    control(f"aprobado ({formato}) sin credenciales ni sesión -> 401", cliente.get(url).status_code == 401)
+    control(f"aprobado ({formato}) con clave incorrecta -> 401",
+            cliente.get(url, headers=CLAVE_MAL).status_code == 401)
+    control(f"el abogado descarga el {formato} aprobado", cliente.get(url, headers=ACOSTA).status_code == 200)
+    control(f"el empleado descarga el {formato} aprobado de su sesión",
+            cliente.get(url, headers={"X-Sesion": sesion_propia}).status_code == 200)
+    r_otra = cliente.get(url, headers={"X-Sesion": sesion_otra})
+    control(f"un empleado descarga el {formato} aprobado de otra sesión -> 403",
+            r_otra.status_code == 403, f"({r_otra.status_code})")
+    desbloquear()
 r = cliente.post("/api/aprobar", json={"id": id1}, headers=ACOSTA).json()
 control("no se aprueba dos veces", not r["ok"])
 

@@ -1,7 +1,7 @@
 # Portal web del estudio: una interfaz simple para empleados y abogados.
 #
-#   /         -> el empleado chatea con el asistente y descarga el borrador
-#                de SU trámite (el de su sesión de chat)
+#   /         -> el empleado chatea con el asistente y descarga el borrador y
+#                la version aprobada de SU trámite (el de su sesión de chat)
 #   /abogado  -> el abogado entra con matrícula y clave, revisa los borradores
 #                pendientes, los aprueba u observa, y descarga la version final
 #                en Word y PDF
@@ -38,7 +38,7 @@ from starlette.concurrency import run_in_threadpool
 import aprobar
 from agente_contratos import tramites
 from agente_contratos.agent import root_agent
-from agente_contratos.campos import CONTRATOS, verificar_abogado
+from agente_contratos.campos import ABOGADOS, CONTRATOS, normalizar_matricula, verificar_abogado
 
 CARPETA = Path(__file__).resolve().parent
 CARPETA_WEB = CARPETA / "web"
@@ -58,13 +58,27 @@ runner = InMemoryRunner(agent=root_agent, app_name=APP)
 # La pagina del abogado manda en cada pedido el encabezado
 #   Authorization: Basic base64("matricula:clave")
 # (la pagina la guarda solo en memoria, no en localStorage).
-# Despues de 5 intentos fallidos seguidos se bloquea todo 1 minuto, aunque
-# despues pongan la clave correcta (asi no se puede probar claves sin parar).
+# Despues de 5 intentos fallidos seguidos con una matricula, esa matricula
+# queda bloqueada 1 minuto, aunque despues pongan la clave correcta (asi no se
+# puede probar claves sin parar). Los otros abogados pueden seguir entrando.
+# Los intentos con matriculas que no existen (o credenciales mal armadas) se
+# cuentan todos juntos en un contador general, para frenar a quien prueba
+# matriculas al azar.
 
 INTENTOS_MAXIMOS = 5
 SEGUNDOS_BLOQUEO = 60
-BLOQUEO = {"fallidos": 0, "hasta": 0.0}
+GENERAL = "(matrículas que no existen)"
+BLOQUEO = {}  # matricula normalizada (o GENERAL) -> {"fallidos": n, "hasta": t}
 _candado = threading.Lock()
+
+
+def contador_de(credenciales):
+    # que contador usa este intento: el de la matricula si existe, si no el general
+    if credenciales is not None:
+        matricula = normalizar_matricula(credenciales[0])
+        if matricula in ABOGADOS:
+            return matricula
+    return GENERAL
 
 
 def leer_credenciales(authorization):
@@ -89,21 +103,23 @@ def exigir_abogado(authorization):
     # esta bloqueado por demasiados intentos)
     if not authorization:
         raise HTTPException(401, "Faltan la matrícula y la clave.")
+    credenciales = leer_credenciales(authorization)
+    clave_contador = contador_de(credenciales)
     with _candado:
-        if time.monotonic() < BLOQUEO["hasta"]:
+        contador = BLOQUEO.setdefault(clave_contador, {"fallidos": 0, "hasta": 0.0})
+        if time.monotonic() < contador["hasta"]:
             raise HTTPException(429, "Demasiados intentos fallidos. Esperá un minuto y probá de nuevo.")
 
-    credenciales = leer_credenciales(authorization)
     correcto = credenciales is not None and verificar_abogado(*credenciales) is not None
 
     with _candado:
         if correcto:
-            BLOQUEO["fallidos"] = 0
+            contador["fallidos"] = 0
         else:
-            BLOQUEO["fallidos"] += 1
-            if BLOQUEO["fallidos"] >= INTENTOS_MAXIMOS:
-                BLOQUEO["fallidos"] = 0
-                BLOQUEO["hasta"] = time.monotonic() + SEGUNDOS_BLOQUEO
+            contador["fallidos"] += 1
+            if contador["fallidos"] >= INTENTOS_MAXIMOS:
+                contador["fallidos"] = 0
+                contador["hasta"] = time.monotonic() + SEGUNDOS_BLOQUEO
     if not correcto:
         raise HTTPException(401, aprobar.MENSAJE_CREDENCIALES)
     return credenciales
@@ -161,38 +177,30 @@ def enviar_archivo(ruta):
     return FileResponse(ruta, filename=ruta.name)
 
 
-@app.get("/descargar/borradores/{archivo}")
-async def descargar_borrador(archivo: str, authorization: str | None = Header(None),
-                             x_sesion: str | None = Header(None)):
-    # lo puede bajar un abogado (con matricula y clave) o el empleado cuya
-    # sesion de chat es la de ese tramite
-    ruta = ruta_descarga("borradores", archivo)
+@app.get("/descargar/{carpeta}/{archivo}")
+async def descargar(carpeta: str, archivo: str, authorization: str | None = Header(None),
+                    x_sesion: str | None = Header(None)):
+    # el borrador y la version aprobada los puede bajar un abogado (con
+    # matricula y clave) o el empleado cuya sesion de chat es la de ese tramite
+    ruta = ruta_descarga(carpeta, archivo)
     if authorization:
         await run_in_threadpool(exigir_abogado, authorization)
     elif x_sesion:
         id_tramite = archivo.split("_")[0]
         if await tramite_de_la_sesion(x_sesion) != id_tramite:
-            raise HTTPException(403, "Ese borrador no es de tu trámite.")
+            raise HTTPException(403, "Ese documento no es de tu trámite.")
     else:
         raise HTTPException(401, "Falta identificarse.")
     return enviar_archivo(ruta)
 
 
-@app.get("/descargar/aprobados/{archivo}")
-def descargar_aprobado(archivo: str, authorization: str | None = Header(None)):
-    ruta = ruta_descarga("aprobados", archivo)
-    exigir_abogado(authorization)
-    return enviar_archivo(ruta)
-
-
-def enlaces(tramite, abogado):
-    # links de descarga que corresponden al estado del tramite.
-    # Los aprobados solo los baja el abogado
+def enlaces(tramite):
+    # links de descarga que corresponden al estado del tramite
     resultado = {}
     if tramite.get("borrador"):
         resultado["borrador"] = f"/descargar/borradores/{tramite['borrador']['archivo']}"
     aprobacion = tramite.get("aprobacion")
-    if abogado and tramite["estado"] == "aprobado" and aprobacion:
+    if tramite["estado"] == "aprobado" and aprobacion:
         resultado["word"] = f"/descargar/aprobados/{aprobacion['docx']}"
         if aprobacion.get("pdf"):
             resultado["pdf"] = f"/descargar/aprobados/{aprobacion['pdf']}"
@@ -215,13 +223,12 @@ def resumen_tramite(tramite):
         "id": tramite["id"],
         "documento": info["nombre"],
         "estado": ESTADOS.get(tramite["estado"], tramite["estado"]),
-        "aprobado": tramite["estado"] == "aprobado",
         "cargados": len(cargados),
         "obligatorios": len(obligatorios),
         # los faltantes vienen como "campo (descripcion)": muestro la descripcion
         "faltan": [re.sub(r"^\w+ \((.*)\)$", r"\1", f) for f in revision["faltantes"]],
         "observaciones": tramite.get("observaciones"),
-        "enlaces": enlaces(tramite, abogado=False),
+        "enlaces": enlaces(tramite),
     }
 
 
@@ -303,7 +310,7 @@ def pendientes(authorization: str | None = Header(None)):
             "fecha": (t.get("borrador") or {}).get("fecha")
                      or (t.get("aprobacion") or {}).get("fecha"),
             "aprobado_por": (t.get("aprobacion") or {}).get("abogado"),
-            "enlaces": enlaces(t, abogado=True),
+            "enlaces": enlaces(t),
         }
     return {
         "pendientes": [fila(t) for t in tramites_con_estado("borrador_generado")],
@@ -329,7 +336,7 @@ def ver_tramite(id_tramite: str, authorization: str | None = Header(None)):
         "datos": [{"dato": campos[c][1], "valor": str(v)} for c, v in tramite["datos"].items()],
         "advertencias": revision["advertencias"],
         "historial": tramite["historial"][-15:],
-        "enlaces": enlaces(tramite, abogado=True),
+        "enlaces": enlaces(tramite),
     }
 
 
@@ -350,7 +357,7 @@ def aprobar_desde_web(pedido: Aprobacion, authorization: str | None = Header(Non
     ok, mensaje = aprobar.aprobar_tramite(pedido.id, matricula, clave)
     tramite = tramites.cargar_tramite(pedido.id)
     return {"ok": ok, "mensaje": mensaje.splitlines()[0],
-            "enlaces": enlaces(tramite, abogado=True) if tramite else {}}
+            "enlaces": enlaces(tramite) if tramite else {}}
 
 
 @app.post("/api/observar")

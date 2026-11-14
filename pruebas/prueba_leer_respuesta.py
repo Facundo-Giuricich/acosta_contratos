@@ -13,7 +13,7 @@ from agente_contratos.modelo_ollama import NO_SE_PUDO_LEER, leer_respuesta
 
 HERRAMIENTAS = {
     "listar_contratos", "iniciar_contrato", "cargar_datos", "ver_resumen",
-    "generar_borrador", "retomar_tramite", "consultar_guia", "mensaje_sin_datos",
+    "generar_borrador", "consultar_guia", "mensaje_sin_datos",
 }
 
 DATOS = {

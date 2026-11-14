@@ -12,7 +12,6 @@ from agente_contratos.herramientas import (
     cargar_datos,
     ver_resumen,
     generar_borrador,
-    retomar_tramite,
     consultar_guia,
     mensaje_sin_datos,
 )
@@ -178,7 +177,6 @@ root_agent = Agent(
         cargar_datos,
         ver_resumen,
         generar_borrador,
-        retomar_tramite,
         consultar_guia,
         mensaje_sin_datos,
     ],

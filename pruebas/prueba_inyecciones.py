@@ -16,7 +16,7 @@ from agente_contratos import tramites
 from agente_contratos.agent import root_agent
 from agente_contratos.modelo_ollama import leer_respuesta
 from agente_contratos.herramientas import (
-    cargar_datos, generar_borrador, iniciar_contrato, retomar_tramite, ver_resumen
+    cargar_datos, generar_borrador, iniciar_contrato, ver_resumen
 )
 
 
@@ -141,16 +141,24 @@ chequear("rechaza preaviso, jurisdicción, honorarios y fecha inventados",
 print("4. Tipos de contrato y trámites inventados (path traversal)")
 r = iniciar_contrato("../../plantillas/contrato_servicios", ContextoFalso())
 chequear("tipo de contrato fuera de la lista", r["estado"] == "error")
-r = retomar_tramite("../plantillas/huellas", ContextoFalso())
-chequear("retomar un archivo que no es un trámite", r["estado"] == "error")
+chequear("cargar un archivo que no es un trámite",
+         tramites.cargar_tramite("../plantillas/huellas") is None)
 
-print("5. El agente no tiene forma de aprobar")
+print("5. El agente no tiene forma de aprobar ni de retomar trámites ajenos")
 nombres = [herramienta.__name__ for herramienta in root_agent.tools]
 chequear("no hay herramienta de aprobación", not any("aprob" in n for n in nombres), nombres)
+# sin usuarios de empleados no se sabe de quien es un tramite: si el agente
+# pudiera retomar uno por su numero, se podria bajar el borrador de otro
+chequear("no hay herramienta para retomar un trámite",
+         not any(p in n for n in nombres for p in ("retom", "abrir_tramite", "cargar_tramite")), nombres)
+chequear("solo están las 7 herramientas previstas", set(nombres) == {
+    "listar_contratos", "iniciar_contrato", "cargar_datos", "ver_resumen",
+    "generar_borrador", "consultar_guia", "mensaje_sin_datos"}, nombres)
 # y si el modelo engañado "inventa" una herramienta, el conector no la ejecuta
-inventada = '<tool_call>{"name": "aprobar_contrato", "arguments": {}}</tool_call>'
-partes = leer_respuesta(inventada, set(nombres))
-chequear("el modelo inventa 'aprobar_contrato'", not any(p.function_call for p in partes))
+for inventada_nombre in ["aprobar_contrato", "retomar_tramite"]:
+    inventada = '<tool_call>{"name": "' + inventada_nombre + '", "arguments": {}}</tool_call>'
+    partes = leer_respuesta(inventada, set(nombres))
+    chequear(f"el modelo inventa '{inventada_nombre}'", not any(p.function_call for p in partes))
 
 print("6. Aprobar sin ser abogado autorizado")
 contexto = contexto_con_tramite()

@@ -166,8 +166,8 @@ portal propio, hecho con FastAPI (ya viene con ADK, no suma dependencias):
 
 - **Empleado** (`/`): un chat. Al costado ve el número de trámite, cuántos
   datos faltan y cuáles, la observación del abogado si se lo devolvió, y el
-  botón para descargar el borrador. Solo ve su propio trámite (el de su
-  sesión de chat). La versión aprobada la entrega el abogado.
+  botón para descargar el borrador y, cuando el abogado lo aprueba, el Word y
+  el PDF finales. Solo ve su propio trámite (el de su sesión de chat).
 - **Abogado** (`/abogado`): entra con matrícula y clave. Ve la lista de
   borradores pendientes y de aprobados. Al elegir uno ve todos los datos, las
   advertencias y el historial, descarga el borrador, y lo aprueba o lo
@@ -179,16 +179,21 @@ Seguridad del portal:
 - Solo escucha en `127.0.0.1`: no queda expuesto en la red del estudio.
 - El agente sigue sin poder aprobar: no tiene ninguna herramienta que llame
   al portal. La aprobación es un formulario aparte.
-- `/api/pendientes`, `/api/tramite/{id}`, `/api/aprobar`, `/api/observar` y
-  la descarga de los aprobados exigen matrícula y clave en cada pedido; si
-  faltan o son incorrectas devuelven 401. La página las guarda solo en
-  memoria (no en `localStorage`): al recargar hay que volver a ingresar.
-- Después de 5 intentos fallidos seguidos se bloquea el ingreso 1 minuto
-  (devuelve 429), aunque después pongan la clave correcta.
+- `/api/pendientes`, `/api/tramite/{id}`, `/api/aprobar` y `/api/observar`
+  exigen matrícula y clave en cada pedido; si faltan o son incorrectas
+  devuelven 401. La página las guarda solo en memoria (no en
+  `localStorage`): al recargar hay que volver a ingresar.
+- Después de 5 intentos fallidos seguidos con una matrícula, esa matrícula
+  queda bloqueada 1 minuto (devuelve 429), aunque después pongan la clave
+  correcta. Los demás abogados siguen pudiendo entrar. Los intentos con
+  matrículas que no existen se cuentan todos juntos en un contador general,
+  que se bloquea igual, para frenar a quien prueba matrículas al azar.
 - Los intentos rechazados de aprobar u observar quedan en el historial del
   trámite (sin la clave).
-- El borrador lo puede descargar un abogado o el empleado cuya sesión de
-  chat es la de ese trámite. Con otra sesión devuelve 403.
+- El borrador y la versión aprobada (Word y PDF) los puede descargar un
+  abogado (con matrícula y clave) o el empleado cuya sesión de chat es la
+  de ese trámite. Sin credenciales ni sesión devuelve 401; con otra sesión,
+  403.
 - Las descargas solo entregan archivos con el nombre que les pone el sistema
   (`T-..._borrador.docx`, `T-..._aprobado.pdf`): no se puede pedir otro archivo.
 - El empleado solo ve las respuestas del asistente, no las llamadas a
@@ -203,12 +208,14 @@ Seguridad del portal:
 | cargar_datos | Guardar datos (cada uno se controla y se valida) |
 | ver_resumen | Ver los datos cargados, los que faltan y los errores |
 | generar_borrador | Generar el borrador si está todo bien y el empleado confirmó |
-| retomar_tramite | Seguir un trámite empezado antes |
 | consultar_guia | Buscar en la guía para empleados (RAG) |
 | mensaje_sin_datos | Para los mensajes que no traen datos (ver más abajo) |
 
 El número de trámite se guarda en el estado de la sesión de ADK, así el
 modelo no tiene que recordarlo y no puede cambiarlo por el de otro trámite.
+No hay herramienta para retomar un trámite por su número: sin usuarios de
+empleados no se puede saber de quién es, y retomar uno ajeno permitiría
+descargar sus documentos.
 
 **Confirmación controlada con código:** `generar_borrador` solo funciona si
 el empleado vio el resumen con exactamente los mismos datos (se compara una
@@ -410,7 +417,7 @@ Se usa "defensa en profundidad": varias capas, si una falla las otras siguen.
    aprobación. La aprobación se hace por fuera del chat, con matrícula y
    clave del abogado. Si el modelo "inventa" una
    herramienta (por ejemplo `aprobar_contrato`), el conector la ignora: solo
-   se ejecutan las 8 herramientas declaradas.
+   se ejecutan las 7 herramientas declaradas.
 5. **Confirmación obligatoria**: no se genera el borrador sin resumen previo
    y sin un mensaje nuevo del empleado (controlado con código).
 6. **Control de origen** (`origen.py`): un dato que el empleado no escribió
@@ -543,10 +550,14 @@ Ya no forman parte del proyecto, pero esto es lo que mostró cada uno:
   los abogados estarían en una base de datos. El portal manda la clave en
   cada pedido sin HTTPS: alcanza porque solo escucha en `127.0.0.1`, pero
   si se abriera a la red haría falta HTTPS y sesiones con vencimiento.
-- El bloqueo por intentos fallidos es uno solo para todo el portal: alguien
-  que pruebe claves también deja afuera 1 minuto a los abogados.
+- El bloqueo es por matrícula: alguien que pruebe claves con la matrícula
+  de un abogado lo deja afuera 1 minuto (a los demás no). Las matrículas que
+  no existen comparten un contador general.
 - Las conversaciones del portal se guardan en memoria: si se cierra el
-  portal, el chat se pierde, pero el trámite no (se retoma con su número).
+  portal o la conversación, el chat se pierde. El trámite queda guardado y
+  el abogado lo sigue viendo, pero el empleado no lo puede retomar: para
+  retomar un trámite en otra sesión haría falta que los empleados inicien
+  sesión.
 - Los CUIT de los documentos de ejemplo (30-71234567-8 y 30-70987654-3) son
   inventados y no pasan el control del dígito verificador. Para probar usar
   30-71234567-1 y 30-70987654-2.

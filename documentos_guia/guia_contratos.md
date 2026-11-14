@@ -147,11 +147,11 @@ No. El borrador tiene la leyenda "SIN VALIDEZ LEGAL" y solo sirve para que lo re
 
 ### ¿Quién aprueba los contratos?
 
-Un abogado del estudio, con su nombre y matrícula. La aprobación queda registrada en el historial del trámite.
+Un abogado del estudio, con su matrícula y su clave. La aprobación queda registrada en el historial del trámite.
 
 ### ¿Puedo retomar un contrato que dejé por la mitad?
 
-Sí. Cada contrato tiene un número de trámite (por ejemplo T-20261111-120455-3f2a). Con ese número el asistente puede retomar la carga de datos.
+Solo mientras sigas en la misma conversación: el asistente recuerda el trámite en el que estás trabajando. Si cerrás la conversación, hay que empezar un trámite nuevo. Por seguridad, el asistente no puede abrir un trámite por su número, porque no tiene forma de saber de quién es.
 
 ### ¿Los datos de los clientes son confidenciales?
 

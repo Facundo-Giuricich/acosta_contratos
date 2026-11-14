@@ -350,20 +350,3 @@ def consultar_guia(pregunta: str) -> dict:
             "responder, decile al empleado que lo consulte con un abogado."
         )
     return resultado
-
-
-def retomar_tramite(numero_tramite: str, tool_context: ToolContext) -> dict:
-    """Retoma un tramite empezado antes, usando su numero (ej: T-20261111-120455-3f2a).
-
-    Args:
-        numero_tramite: Numero del tramite que dio iniciar_contrato.
-
-    Returns:
-        El resumen del tramite o un error si no existe.
-    """
-    tramite = tramites.cargar_tramite(numero_tramite)
-    if tramite is None:
-        return {"estado": "error", "mensaje": "No existe ese número de trámite."}
-
-    tool_context.state["id_tramite"] = tramite["id"]
-    return ver_resumen(tool_context)
