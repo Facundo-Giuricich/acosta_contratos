@@ -16,15 +16,19 @@ env/bin/python indexar_guia.py
 
 # pruebas rápidas (no necesitan el modelo)
 env/bin/python -m pruebas.prueba_plantilla
+env/bin/python -m pruebas.prueba_expediente
 env/bin/python -m pruebas.prueba_validacion
 env/bin/python -m pruebas.prueba_tramites
 env/bin/python -m pruebas.prueba_inyecciones
 env/bin/python -m pruebas.prueba_leer_respuesta
+env/bin/python -m pruebas.prueba_portal
 
-# el agente (abrir http://localhost:8000 y elegir agente_contratos)
+# el portal: empleados en http://localhost:8080, abogados en http://localhost:8080/abogado
+# (matrícula de prueba: T.º 12 F.º 345, Dra. Valeria Acosta)
+env/bin/python portal.py
+
+# alternativas para desarrollo: la interfaz de ADK y la aprobación por consola
 env/bin/adk web --port 8000
-
-# aprobar como abogado (matrícula de prueba: T.º 12 F.º 345, Dra. Valeria Acosta)
 env/bin/python aprobar.py
 ```
 
@@ -36,18 +40,30 @@ Mensaje de ejemplo para pegar en el chat:
 > 28.456.789, socio gerente. El prestador es Lucía Belén Fernández, DNI
 > 35.678.901, con domicilio en Calle Mitre 845, 3.º B, Rosario, Santa Fe.
 
+Para un expediente:
+
+> Hay que abrir un expediente nuevo. Es el EXP-2026-0147, abierto el 12/02/2026,
+> un reclamo por incumplimiento contractual del área de Derecho Comercial. La
+> responsable es la Dra. Valeria Acosta y la prioridad es alta.
+
 - Sin placa de video, cada respuesta del agente tarda entre 20 y 60 segundos.
-- El CUIT del ejemplo del enunciado (30-71234567-8) es inventado y se rechaza
-  a propósito. Para probar, usar 30-71234567-1.
+- Los CUIT de los documentos de ejemplo del estudio (30-71234567-8 y
+  30-70987654-3) son inventados y se rechazan a propósito. Para probar, usar
+  30-71234567-1 y 30-70987654-2.
 
 ## Descripción
 
 Prototipo de un asistente con inteligencia artificial para el estudio jurídico
-Acosta & Asociados. Permite que un empleado pida un contrato hablando en
-lenguaje natural: el asistente identifica el tipo de contrato, junta los datos,
-detecta los que faltan o están mal y genera un BORRADOR usando la plantilla
-aprobada por el estudio. Después un abogado lo revisa y lo aprueba, y recién
-ahí se genera la versión final en Word y PDF.
+Acosta & Asociados. Permite que un empleado pida un documento hablando en
+lenguaje natural: el asistente identifica qué documento necesita (un contrato
+de prestación de servicios o la apertura de un expediente jurídico), junta los
+datos, detecta los que faltan o están mal y genera un BORRADOR usando la
+plantilla aprobada por el estudio. Después un abogado lo revisa y lo aprueba,
+y recién ahí se genera la versión final en Word y PDF.
+
+Todo se usa desde un portal web simple (`portal.py`): el empleado chatea con
+el asistente y descarga el borrador; el abogado revisa, aprueba u observa, y
+descarga el Word y el PDF finales.
 
 Está hecho con Python, Google ADK y un modelo local (Ollama), así los datos
 de los clientes no salen de la computadora del estudio.
@@ -61,7 +77,8 @@ genera el documento y controla la seguridad.**
   la plantilla aprobada.
 - Ningún dato llega al contrato sin pasar por las validaciones en Python.
 - El agente no tiene ninguna herramienta para aprobar contratos. La
-  aprobación la hace un abogado con un programa aparte (`aprobar.py`).
+  aprobación la hace un abogado por fuera del chat (página del abogado en el
+  portal, o `aprobar.py` por consola).
 
 Así, aunque alguien logre engañar al modelo con una inyección de prompt,
 el código sigue frenando lo que no corresponde.
@@ -69,7 +86,8 @@ el código sigue frenando lo que no corresponde.
 ## Tecnologías
 
 - Python 3.12 y uv (entorno virtual y dependencias).
-- Google ADK: el agente y la interfaz de prueba (`adk web`).
+- Google ADK: el agente y la interfaz de desarrollo (`adk web`).
+- FastAPI y uvicorn (vienen con ADK): el portal web para empleados y abogados.
 - Conector propio ADK - Ollama (`modelo_ollama.py`, ver más abajo).
 - Ollama con Qwen 2.5 7B: el modelo de lenguaje (corre local).
 - nomic-embed-text: embeddings para el RAG.
@@ -86,12 +104,13 @@ que el proyecto importa de verdad.
 
 ## Cómo funciona
 
-1. **Plantilla** (`crear_plantillas.py`): se toma el contrato de ejemplo del
-   estudio y cada dato en negrita se reemplaza por un marcador `{{ campo }}`.
-   Se guarda una huella SHA-256 de la plantilla para detectar si alguien la
-   modifica.
+1. **Plantillas** (`crear_plantillas.py`): se toman los documentos de ejemplo
+   del estudio (el contrato CONT-001 y el expediente EXP-001) y cada dato en
+   negrita se reemplaza por un marcador `{{ campo }}`. Se guarda una huella
+   SHA-256 de cada plantilla para detectar si alguien la modifica.
 2. **Conversación** (`agente_contratos/agent.py`): el empleado pide un
-   contrato y el agente usa las herramientas para cargar los datos.
+   documento, el agente identifica cuál es (si no queda claro, pregunta) y usa
+   las herramientas para cargar los datos.
 3. **Control de origen** (`agente_contratos/origen.py`): cada dato tiene que
    salir de lo que escribió el empleado (ver más abajo).
 4. **Validación** (`agente_contratos/validacion.py`): cada dato se controla
@@ -104,11 +123,65 @@ que el proyecto importa de verdad.
 6. **Borrador** (`agente_contratos/generador.py`): con todos los datos bien
    y la confirmación del empleado, se completa la plantilla y se marca como
    "BORRADOR - SIN VALIDEZ LEGAL".
-7. **Aprobación** (`aprobar.py`): un abogado autorizado revisa los datos y
+7. **Aprobación** (portal `/abogado` o `aprobar.py`): un abogado autorizado revisa los datos y
    aprueba u observa el borrador. Si lo aprueba, se genera la versión final
    en Word y PDF desde los datos validados.
 8. **Consultas** (`agente_contratos/guia.py`): si el empleado tiene dudas
    sobre un dato, el agente busca en la guía interna con RAG.
+
+## Documentos disponibles
+
+| Documento | Plantilla | Datos |
+|---|---|---|
+| Contrato de Prestación de Servicios Profesionales | `contrato_ejemplo_CONT-001.docx` | 21 obligatorios |
+| Expediente Jurídico (apertura) | `expediente_ejemplo_EXP-001.docx` | 21 obligatorios + 7 opcionales |
+
+Detalles del expediente:
+
+- **Carátula:** la arma el código con la forma "Cliente c/ Contraparte s/
+  materia". El empleado solo da la materia.
+- **Profesional responsable:** tiene que ser un abogado del estudio (la lista
+  está en `campos.py`). La matrícula la completa el sistema desde esa lista,
+  no la escribe nadie.
+- **Tablas de actuaciones y documentación:** el modelo trae filas de ejemplo.
+  Un expediente nuevo arranca con una sola actuación (la apertura) y sin
+  documentos incorporados.
+- **Opcionales:** observaciones, pendientes, próximas acciones y resumen se
+  pueden dejar vacíos; en el documento quedan con "—".
+- **Conclusiones:** siempre dicen "A completar por el profesional
+  responsable.": son del abogado, no del empleado ni de la IA.
+- **Validaciones propias:** número EXP-AAAA-NNNN, correo, teléfono, prioridad
+  (Alta, Media o Baja), el hecho no puede ser posterior a la apertura, y
+  cliente y contraparte no pueden ser la misma persona.
+
+Para agregar otro documento: poner el modelo en `documentos_modelo/`, sumar
+sus reemplazos en `crear_plantillas.py`, sus campos en `campos.py` y sus
+valores en `formatos.py`.
+
+## Portal web: portal.py
+
+La interfaz de `adk web` es para desarrolladores (muestra eventos y JSON).
+Para que la usen empleados y abogados sin conocimientos técnicos hay un
+portal propio, hecho con FastAPI (ya viene con ADK, no suma dependencias):
+
+- **Empleado** (`/`): un chat. Al costado ve el número de trámite, cuántos
+  datos faltan y cuáles, la observación del abogado si se lo devolvió, y el
+  botón para descargar el borrador o la versión aprobada.
+- **Abogado** (`/abogado`): la lista de borradores pendientes y de aprobados.
+  Al elegir uno ve todos los datos, las advertencias y el historial, descarga
+  el borrador, y lo aprueba (nombre + matrícula) o lo devuelve con una
+  observación. Usa las mismas funciones que `aprobar.py`, con los mismos
+  controles.
+
+Seguridad del portal:
+
+- Solo escucha en `127.0.0.1`: no queda expuesto en la red del estudio.
+- El agente sigue sin poder aprobar: no tiene ninguna herramienta que llame
+  al portal. La aprobación es un formulario aparte.
+- Las descargas solo entregan archivos con el nombre que les pone el sistema
+  (`T-..._borrador.docx`, `T-..._aprobado.pdf`): no se puede pedir otro archivo.
+- El empleado solo ve las respuestas del asistente, no las llamadas a
+  herramientas ni los mensajes internos.
 
 ## Herramientas del agente
 
@@ -210,27 +283,26 @@ acosta_contratos/
     modelo_ollama.py   conector entre ADK y Ollama
     herramientas.py    herramientas que usa el agente
     origen.py          control de que los datos salgan de lo que escribió el empleado
-    campos.py          contratos disponibles y datos que pide cada uno
+    campos.py          documentos disponibles, datos que pide cada uno y abogados
     validacion.py      validación de datos
     tramites.py        trámites, historial y borradores
     formatos.py        fechas, montos y números en letras
     generador.py       completa la plantilla
     guia.py            búsqueda en la guía (RAG)
-  documentos_modelo/   contratos de ejemplo del estudio (no se tocan)
+  documentos_modelo/   contrato y expediente de ejemplo del estudio (no se tocan)
   documentos_guia/     guía interna para empleados
-  plantillas/          plantilla generada y su huella
+  plantillas/          plantillas generadas y sus huellas
+  web/                 páginas del portal (empleado y abogado)
   pruebas/             pruebas automáticas
+  portal.py            portal web para empleados y abogados
   crear_plantillas.py
   indexar_guia.py
-  aprobar.py
+  aprobar.py           aprobación por consola (alternativa al portal)
   requirements.txt
 ```
 
 Se crean solas al usar el sistema: `tramites/`, `generados/borradores/`,
 `generados/aprobados/`, `registros/`, `pruebas/salida/` y `base_vectorial/`.
-
-`_para_borrar/` tiene lo que generaron las pruebas durante el desarrollo y los
-scripts de depuración que ya no se usan. Se puede borrar entera.
 
 ## Instalación
 
@@ -252,26 +324,39 @@ Preparar la plantilla y la guía (una sola vez):
 
 ## Uso
 
-### Empleado: pedir un contrato
-
 ```
-.\env\Scripts\adk.exe web --port 8000
+.\env\Scripts\python.exe portal.py
 ```
 
-Abrir http://localhost:8000 y elegir `agente_contratos`. Ejemplo:
+### Empleado: pedir un documento
+
+Abrir http://localhost:8080 y escribir el pedido. Ejemplo:
 
 > Necesito un contrato de servicios. La contratante es Distribuidora del
 > Litoral S.R.L., CUIT 30-71234567-1...
+
+Cuando el borrador está listo, aparece el botón para descargarlo al costado.
 
 Si Ollama no está en `http://localhost:11434`, indicar dónde está con la
 variable `OLLAMA_API_BASE`.
 
 ### Abogado: revisar y aprobar
 
+Abrir http://localhost:8080/abogado, elegir el documento pendiente, revisar
+los datos y el borrador, y aprobarlo con nombre y matrícula (o devolverlo con
+una observación). Después se descargan el Word y el PDF finales.
+
+También se puede hacer por consola:
+
 ```
 .\env\Scripts\python.exe aprobar.py                 (lista los pendientes)
 .\env\Scripts\python.exe aprobar.py T-2026...       (revisar uno)
 ```
+
+### Interfaz de desarrollo
+
+`.\env\Scripts\adk.exe web --port 8000` abre la interfaz de ADK, que muestra
+cada llamada a herramienta. Sirve para depurar, no para los empleados.
 
 Para el prototipo, las matrículas autorizadas están en `aprobar.py`
 (por ejemplo `T.º 12 F.º 345`, Dra. Valeria Acosta). El nombre que escribe
@@ -283,11 +368,13 @@ que se escribió.
 ## Pruebas
 
 ```
-.\env\Scripts\python.exe -m pruebas.prueba_plantilla        plantilla y generador
+.\env\Scripts\python.exe -m pruebas.prueba_plantilla        plantilla del contrato y generador
+.\env\Scripts\python.exe -m pruebas.prueba_expediente       plantilla, validaciones y trámite del expediente
 .\env\Scripts\python.exe -m pruebas.prueba_validacion       validación de datos
 .\env\Scripts\python.exe -m pruebas.prueba_tramites         trámite completo
 .\env\Scripts\python.exe -m pruebas.prueba_inyecciones      ataques e inyecciones
 .\env\Scripts\python.exe -m pruebas.prueba_leer_respuesta   lectura de las llamadas del modelo
+.\env\Scripts\python.exe -m pruebas.prueba_portal           portal: aprobación, observación y descargas
 .\env\Scripts\python.exe -m pruebas.probar_agente           agente con el modelo (necesita Ollama)
 ```
 
@@ -304,7 +391,7 @@ Se usa "defensa en profundidad": varias capas, si una falla las otras siguen.
    Jinja2 con autoescape), nunca se ejecutan. La huella SHA-256 detecta
    cambios en la plantilla.
 4. **Sin permiso para aprobar**: el agente no tiene herramienta de
-   aprobación. La aprobación es un programa aparte, con matrícula autorizada
+   aprobación. La aprobación se hace por fuera del chat, con matrícula autorizada
    y nombre que corresponda a esa matrícula. Si el modelo "inventa" una
    herramienta (por ejemplo `aprobar_contrato`), el conector la ignora: solo
    se ejecutan las 8 herramientas declaradas.
@@ -326,17 +413,18 @@ Se usa "defensa en profundidad": varias capas, si una falla las otras siguen.
 
 | Requerimiento | Cómo se cumple |
 |---|---|
-| RF01 Interacción | Chat en lenguaje natural con ADK web |
-| RF02 Tipo de documento | `listar_contratos` / `iniciar_contrato` con lista cerrada |
+| RF01 Interacción | Chat en lenguaje natural en el portal (`portal.py`) |
+| RF02 Tipo de documento | Dos documentos (contrato y expediente); el agente elige con `iniciar_contrato` sobre una lista cerrada y pregunta si no queda claro |
 | RF03 Recopilación | `cargar_datos` desde texto libre |
-| RF04 Faltantes | `revisar_tramite` lista lo que falta y no deja generar |
-| RF05 Generación | Plantilla del estudio con docxtpl |
+| RF04 Faltantes | `cargar_datos` y `ver_resumen` devuelven lo que falta, el portal lo muestra al costado y no se genera hasta tenerlo todo |
+| RF05 Generación | Plantillas del estudio con docxtpl |
 | RF06 Validación | `validacion.py` + resumen y confirmación antes de generar |
-| RF07 Aprobación | `aprobar.py` con abogado autorizado |
-| RF08 Exportación | Word y PDF de la versión aprobada |
-| Confidencialidad | Modelo local, registro general sin datos personales |
-| Integridad | Huella de la plantilla, sin cláusulas nuevas |
+| RF07 Aprobación | Página del abogado en el portal (o `aprobar.py`), con matrícula autorizada |
+| RF08 Exportación | Descarga del borrador y del Word y PDF aprobados desde el portal |
+| Confidencialidad | Modelo local, portal solo en 127.0.0.1, registro general sin datos personales |
+| Integridad | Huella de cada plantilla, sin cláusulas nuevas |
 | Trazabilidad | Historial por trámite + registro general |
+| Usabilidad | Portal sin pantallas técnicas: chat, datos que faltan y botones de descarga |
 | Confiabilidad | No se genera con datos faltantes, inconsistentes o inventados |
 | Supervisión humana | Borrador sin validez hasta la aprobación |
 
@@ -381,10 +469,10 @@ esa categoría.
 | El modelo mostró el recordatorio de `mensaje_sin_datos` | El filtro solo conocía las instrucciones | El filtro también conoce los mensajes de las herramientas |
 | No salía el PDF aunque hay Word | Office sin licencia activa: Word solo abre en modo lectura y docx2pdf lo abre para editar | Se abre el Word en solo lectura por COM y se exporta a PDF |
 
-### Scripts de depuración (movidos a `_para_borrar/`)
+### Scripts de depuración
 
-Para encontrar la causa de las respuestas vacías se usaron estos scripts. Ya
-no hacen falta, pero esto es lo que mostró cada uno:
+Para encontrar la causa de las respuestas vacías se usaron estos scripts.
+Ya no forman parte del proyecto, pero esto es lo que mostró cada uno:
 
 - **`diagnostico.py`**: intentaba importar cada librería por separado, para
   saber cuál bloqueaba Windows. Mostró que la única que fallaba era
@@ -412,18 +500,34 @@ no hacen falta, pero esto es lo que mostró cada uno:
 
 ## Limitaciones
 
-- Por ahora hay un solo tipo de contrato (servicios profesionales).
-  Para agregar otro hay que sumar su plantilla y sus campos en `campos.py`.
+- Hay dos documentos (contrato de servicios y expediente). Para agregar otro
+  hay que sumar su plantilla, sus campos y sus valores (ver "Documentos
+  disponibles").
+- El filtro de palabras rechaza "cláusula" en cualquier dato. En un
+  expediente sobre un incumplimiento puede ser molesto ("se incumplió la
+  cláusula 3"): hay que escribirlo de otra forma ("el punto 3 del contrato").
+- Los trámites se guardan en archivos JSON sin cifrar en la computadora del
+  estudio. En un sistema real irían en una base de datos con acceso
+  controlado.
 - El filtro de palabras se puede esquivar escribiendo raro (por ejemplo
   "1gn0rá"). Por eso no es la única defensa: el texto igual se inserta
   literal y lo revisa el abogado.
 - El modelo es chico (7B): a veces puede equivocarse al elegir una
   herramienta o al pasar un dato. Las validaciones evitan que eso termine
   en el contrato, pero puede hacer falta repetir la pregunta.
+- El control de origen controla que el dato esté escrito, no para qué lo
+  escribió el empleado. En una prueba, el modelo cargó "Rosario" como ciudad
+  de firma porque aparecía en un domicilio. Por eso el empleado tiene que
+  revisar el resumen antes de confirmar, y el abogado los datos antes de
+  aprobar.
 - El control de origen compara texto: si el empleado da un dato de una forma
   muy distinta (por ejemplo "4,8 millones"), se le va a pedir de nuevo.
 - No hay usuarios con contraseña: se registra el usuario de Windows y la
-  matrícula del abogado. En un sistema real haría falta un login.
-- El CUIT del contrato de ejemplo (30-71234567-8) es inventado y no pasa el
-  control del dígito verificador. Para probar usar uno válido, por ejemplo
-  30-71234567-1.
+  matrícula del abogado. En el portal, la página del abogado está abierta a
+  cualquiera que use esa computadora (lo que frena una aprobación es el
+  control de nombre y matrícula). En un sistema real haría falta un login.
+- Las conversaciones del portal se guardan en memoria: si se cierra el
+  portal, el chat se pierde, pero el trámite no (se retoma con su número).
+- Los CUIT de los documentos de ejemplo (30-71234567-8 y 30-70987654-3) son
+  inventados y no pasan el control del dígito verificador. Para probar usar
+  30-71234567-1 y 30-70987654-2.
