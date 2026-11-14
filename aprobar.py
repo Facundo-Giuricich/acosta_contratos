@@ -7,28 +7,35 @@
 #   .\env\Scripts\python.exe aprobar.py                  -> lista los borradores pendientes
 #   .\env\Scripts\python.exe aprobar.py T-2026...        -> revisar y aprobar / rechazar uno
 
+import getpass
 import hashlib
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 from agente_contratos import tramites
-from agente_contratos.campos import ABOGADOS, CONTRATOS
+from agente_contratos.campos import ABOGADOS, CONTRATOS, normalizar_matricula, verificar_abogado
 from agente_contratos.generador import generar_contrato
-from agente_contratos.validacion import normalizar_nombre
 
 CARPETA = Path(__file__).resolve().parent
 CARPETA_APROBADOS = CARPETA / "generados" / "aprobados"
 
-# Abogados que pueden aprobar (matricula -> nombre). La lista esta en campos.py.
-# En un sistema real esto saldria de un login con usuario y contraseña.
-ABOGADOS_AUTORIZADOS = {matricula: a["nombre"] for matricula, a in ABOGADOS.items()}
+# Pueden aprobar u observar los abogados de campos.py, con su matricula y su
+# clave (la clave se guarda como hash, ver verificar_abogado en campos.py).
+MENSAJE_CREDENCIALES = "Matrícula o clave incorrecta."
 
 
-def normalizar_matricula(matricula):
-    # "T.º 12 F.º 345" -> "T12F345"
-    return re.sub(r"[^A-Za-z0-9]", "", matricula).upper()
+def autenticar(tramite, matricula, clave, accion):
+    # devuelve la matricula normalizada si las credenciales son correctas.
+    # Si no, anota el intento rechazado en el historial del tramite
+    # (sin la clave) y devuelve None
+    autorizado = verificar_abogado(matricula, clave)
+    if autorizado is None:
+        escrita = normalizar_matricula(matricula)[:20] or "(vacía)"
+        tramites.anotar(tramite, f"{accion} rechazada",
+                        f"matrícula o clave incorrecta (matrícula escrita: {escrita})")
+        tramites.guardar_tramite(tramite)
+    return autorizado
 
 
 def nombre_del_tramite(tramite):
@@ -110,32 +117,21 @@ def mostrar_tramite(tramite):
     print("=" * 70)
 
 
-def aprobar_tramite(id_tramite, nombre, matricula):
+def aprobar_tramite(id_tramite, matricula, clave):
     # devuelve (ok, mensaje)
     tramite = tramites.cargar_tramite(id_tramite)
     if tramite is None:
         return False, "No existe ese trámite."
+
+    # primero las credenciales: sin matricula y clave correctas no se hace nada
+    matricula = autenticar(tramite, matricula, clave, "aprobacion")
+    if matricula is None:
+        return False, MENSAJE_CREDENCIALES
+    # se guarda siempre el nombre oficial de esa matricula
+    nombre = ABOGADOS[matricula]["nombre"]
+
     if tramite["estado"] != "borrador_generado":
         return False, f"El trámite no tiene un borrador pendiente (estado: {tramite['estado']})."
-
-    matricula = normalizar_matricula(matricula)
-    if matricula not in ABOGADOS_AUTORIZADOS:
-        tramites.anotar(tramite, "aprobacion rechazada", "matrícula no autorizada")
-        tramites.guardar_tramite(tramite)
-        return False, "Esa matrícula no está autorizada para aprobar contratos."
-    if not nombre.strip():
-        return False, "Falta el nombre del abogado."
-
-    # No se guarda el nombre tal como lo escribieron: se usa el que figura
-    # para esa matricula. Si el nombre escrito no es ese, se rechaza
-    # (alguien podria estar usando la matricula de otro abogado).
-    nombre_autorizado = ABOGADOS_AUTORIZADOS[matricula]
-    if normalizar_nombre(nombre) != normalizar_nombre(nombre_autorizado):
-        tramites.anotar(tramite, "aprobacion rechazada",
-                        f"el nombre escrito no corresponde a la matrícula {matricula}")
-        tramites.guardar_tramite(tramite)
-        return False, "El nombre no corresponde a esa matrícula."
-    nombre = nombre_autorizado
 
     # controlo de nuevo todo antes de generar la version final
     revision = tramites.revisar_tramite(tramite)
@@ -156,28 +152,37 @@ def aprobar_tramite(id_tramite, nombre, matricula):
 
     tramite["estado"] = "aprobado"
     tramite["aprobacion"] = {
-        "abogado": nombre.strip(),
+        "abogado": nombre,
         "matricula": matricula,
         "fecha": tramites.ahora(),
         "docx": ruta_docx.name,
         "huella_docx": huella(ruta_docx),
         "pdf": ruta_pdf.name if ruta_pdf else None,
     }
-    tramites.anotar(tramite, "documento aprobado", f"por {nombre.strip()} (mat. {matricula})")
+    tramites.anotar(tramite, "documento aprobado", f"por {nombre} (mat. {matricula})")
     tramites.guardar_tramite(tramite)
 
-    mensaje = f"Documento aprobado. Word: {ruta_docx}"
+    # solo el nombre del archivo, no la ruta de la computadora
+    mensaje = f"Documento aprobado. Word: {ruta_docx.name}"
     if ruta_pdf:
-        mensaje += f"\nPDF: {ruta_pdf}"
+        mensaje += f"\nPDF: {ruta_pdf.name}"
     else:
         mensaje += "\nNo se pudo generar el PDF (hace falta Word o LibreOffice). Quedó el Word."
     return True, mensaje
 
 
-def observar_tramite(id_tramite, nombre, motivo):
+def observar_tramite(id_tramite, matricula, clave, motivo):
     # el abogado no lo aprueba y lo devuelve con una observacion
     tramite = tramites.cargar_tramite(id_tramite)
-    if tramite is None or tramite["estado"] != "borrador_generado":
+    if tramite is None:
+        return False, "No hay un borrador pendiente para ese trámite."
+
+    matricula = autenticar(tramite, matricula, clave, "observacion")
+    if matricula is None:
+        return False, MENSAJE_CREDENCIALES
+    nombre = ABOGADOS[matricula]["nombre"]
+
+    if tramite["estado"] != "borrador_generado":
         return False, "No hay un borrador pendiente para ese trámite."
     if not motivo.strip():
         return False, "Tenés que escribir el motivo."
@@ -185,7 +190,7 @@ def observar_tramite(id_tramite, nombre, motivo):
     tramite["estado"] = "cargando_datos"
     tramite["borrador"] = None
     tramite["observaciones"] = motivo.strip()
-    tramites.anotar(tramite, "borrador observado", f"{nombre.strip()}: {motivo.strip()}")
+    tramites.anotar(tramite, "borrador observado", f"{nombre}: {motivo.strip()}")
     tramites.guardar_tramite(tramite)
     return True, "El trámite volvió al empleado con la observación."
 
@@ -214,15 +219,14 @@ def main():
     print("Revisá también el Word del borrador antes de decidir.")
     opcion = input("¿Qué querés hacer? (a = aprobar, o = observar, cualquier otra = salir): ").strip().lower()
 
-    if opcion == "a":
-        nombre = input("Nombre del abogado: ")
+    if opcion in ("a", "o"):
         matricula = input("Matrícula (ej: T.º 12 F.º 345): ")
-        ok, mensaje = aprobar_tramite(tramite["id"], nombre, matricula)
-        print(mensaje)
-    elif opcion == "o":
-        nombre = input("Nombre del abogado: ")
-        motivo = input("Motivo de la observación: ")
-        ok, mensaje = observar_tramite(tramite["id"], nombre, motivo)
+        clave = getpass.getpass("Clave (no se ve al escribirla): ")
+        if opcion == "a":
+            ok, mensaje = aprobar_tramite(tramite["id"], matricula, clave)
+        else:
+            motivo = input("Motivo de la observación: ")
+            ok, mensaje = observar_tramite(tramite["id"], matricula, clave, motivo)
         print(mensaje)
     else:
         print("No se hizo ningún cambio.")

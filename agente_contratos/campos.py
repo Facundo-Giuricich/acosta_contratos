@@ -21,13 +21,63 @@
 # la plantilla pone "—". El resto son obligatorios.
 # "campo_principal": el dato que identifica el tramite en los listados.
 
-# Abogados del estudio (matricula normalizada -> nombre y matricula como se escribe).
-# Los usa aprobar.py (quien puede aprobar) y el expediente (profesional responsable).
-# En un sistema real esto saldria de una base de datos con login.
+import hashlib
+import hmac
+import re
+
+# Abogados del estudio (matricula normalizada -> nombre, matricula como se
+# escribe y clave). Los usa aprobar.py y el portal (quien puede aprobar) y el
+# expediente (profesional responsable).
+#
+# La clave NO se guarda: se guarda una sal al azar y el hash
+# pbkdf2_hmac(sha256, clave, sal, ITERACIONES). Para comprobarla se calcula
+# el hash de lo que escribieron y se compara con hmac.compare_digest.
+# Claves de prueba del prototipo: acosta2026 y ledesma2026. En un sistema real
+# cada abogado elegiria la suya y esto saldria de una base de datos.
+ITERACIONES = 200_000
+
 ABOGADOS = {
-    "T12F345": {"nombre": "Dra. Valeria Acosta", "matricula": "T.º 12 F.º 345"},
-    "T15F210": {"nombre": "Dr. Tomás Ledesma", "matricula": "T.º 15 F.º 210"},
+    "T12F345": {
+        "nombre": "Dra. Valeria Acosta", "matricula": "T.º 12 F.º 345",
+        "sal": "b56a16357af58cbb3e3f9940f783ab19",
+        "hash_clave": "07d1f34a282e1d36430ee9d6c114852231c84dca50ce0aa0c428ccb1eb84dc46",
+    },
+    "T15F210": {
+        "nombre": "Dr. Tomás Ledesma", "matricula": "T.º 15 F.º 210",
+        "sal": "a054d2bfbb12e9fc089b978dc75d0bf5",
+        "hash_clave": "bfa07a7f8c885bee934947fd3e932a82513e16c0c12622d999cc82722c0a60e5",
+    },
 }
+
+# para que una matricula inexistente tarde lo mismo que una real
+# (asi no se puede averiguar cuales existen midiendo el tiempo)
+_SAL_FALSA = "00000000000000000000000000000000"
+_HASH_FALSO = "0" * 64
+
+
+def normalizar_matricula(matricula):
+    # "T.º 12 F.º 345" -> "T12F345"
+    return re.sub(r"[^A-Za-z0-9]", "", str(matricula or "")).upper()
+
+
+def hash_clave(clave, sal_hex):
+    return hashlib.pbkdf2_hmac("sha256", clave.encode("utf-8"),
+                               bytes.fromhex(sal_hex), ITERACIONES).hex()
+
+
+def verificar_abogado(matricula, clave):
+    # devuelve la matricula normalizada si la matricula existe y la clave es
+    # la correcta; si no, None
+    if not isinstance(matricula, str) or not isinstance(clave, str):
+        return None
+    normalizada = normalizar_matricula(matricula)
+    abogado = ABOGADOS.get(normalizada)
+    sal = abogado["sal"] if abogado else _SAL_FALSA
+    esperado = abogado["hash_clave"] if abogado else _HASH_FALSO
+    coincide = hmac.compare_digest(hash_clave(clave, sal), esperado)
+    if abogado and clave and coincide:
+        return normalizada
+    return None
 
 CONTRATOS = {
     "contrato_servicios": {

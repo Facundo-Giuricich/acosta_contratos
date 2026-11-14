@@ -145,12 +145,34 @@
     }
     if (t.observaciones) html += `<div class="aviso">Observación del abogado: ${escapar(t.observaciones)}</div>`;
     const e = t.enlaces || {};
-    if (e.borrador) html += `<a class="descarga" href="${e.borrador}">Descargar borrador (Word)</a>
+    if (e.borrador) html += `<a class="descarga" href="#" data-descarga="${escapar(e.borrador)}">Descargar borrador (Word)</a>
       <div class="aviso">Es un borrador: no se puede usar hasta que lo apruebe un abogado.</div>`;
-    if (e.word) html += `<a class="descarga" href="${e.word}">Descargar versión aprobada (Word)</a>`;
-    if (e.pdf) html += `<a class="descarga" href="${e.pdf}">Descargar versión aprobada (PDF)</a>`;
+    if (t.aprobado) html += `<div class="aviso">El abogado ya lo aprobó. La versión final te la entrega el abogado.</div>`;
     caja.innerHTML = html;
   }
+
+  // el borrador solo se descarga con la sesión de este chat (el servidor
+  // controla que el trámite sea de esta sesión)
+  async function descargar(url) {
+    try {
+      const r = await fetch(url, {headers: {"X-Sesion": sesion || ""}});
+      if (!r.ok) { alert("No se pudo descargar el borrador."); return; }
+      const enlace = document.createElement("a");
+      enlace.href = URL.createObjectURL(await r.blob());
+      enlace.download = url.split("/").pop();
+      document.body.appendChild(enlace);
+      enlace.click();
+      enlace.remove();
+      setTimeout(() => URL.revokeObjectURL(enlace.href), 10000);
+    } catch (error) {
+      alert("No me pude conectar con el sistema.");
+    }
+  }
+
+  document.addEventListener("click", e => {
+    const enlace = e.target.closest("[data-descarga]");
+    if (enlace) { e.preventDefault(); descargar(enlace.dataset.descarga); }
+  });
 
   async function enviar(e) {
     e.preventDefault();

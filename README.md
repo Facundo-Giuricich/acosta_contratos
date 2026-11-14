@@ -24,7 +24,7 @@ env/bin/python -m pruebas.prueba_leer_respuesta
 env/bin/python -m pruebas.prueba_portal
 
 # el portal: empleados en http://localhost:8080, abogados en http://localhost:8080/abogado
-# (matrícula de prueba: T.º 12 F.º 345, Dra. Valeria Acosta)
+# (datos de prueba: matrícula T.º 12 F.º 345 + clave acosta2026)
 env/bin/python portal.py
 
 # alternativas para desarrollo: la interfaz de ADK y la aprobación por consola
@@ -166,18 +166,29 @@ portal propio, hecho con FastAPI (ya viene con ADK, no suma dependencias):
 
 - **Empleado** (`/`): un chat. Al costado ve el número de trámite, cuántos
   datos faltan y cuáles, la observación del abogado si se lo devolvió, y el
-  botón para descargar el borrador o la versión aprobada.
-- **Abogado** (`/abogado`): la lista de borradores pendientes y de aprobados.
-  Al elegir uno ve todos los datos, las advertencias y el historial, descarga
-  el borrador, y lo aprueba (nombre + matrícula) o lo devuelve con una
-  observación. Usa las mismas funciones que `aprobar.py`, con los mismos
-  controles.
+  botón para descargar el borrador. Solo ve su propio trámite (el de su
+  sesión de chat). La versión aprobada la entrega el abogado.
+- **Abogado** (`/abogado`): entra con matrícula y clave. Ve la lista de
+  borradores pendientes y de aprobados. Al elegir uno ve todos los datos, las
+  advertencias y el historial, descarga el borrador, y lo aprueba o lo
+  devuelve con una observación (queda a nombre del abogado que entró). Usa
+  las mismas funciones que `aprobar.py`, con los mismos controles.
 
 Seguridad del portal:
 
 - Solo escucha en `127.0.0.1`: no queda expuesto en la red del estudio.
 - El agente sigue sin poder aprobar: no tiene ninguna herramienta que llame
   al portal. La aprobación es un formulario aparte.
+- `/api/pendientes`, `/api/tramite/{id}`, `/api/aprobar`, `/api/observar` y
+  la descarga de los aprobados exigen matrícula y clave en cada pedido; si
+  faltan o son incorrectas devuelven 401. La página las guarda solo en
+  memoria (no en `localStorage`): al recargar hay que volver a ingresar.
+- Después de 5 intentos fallidos seguidos se bloquea el ingreso 1 minuto
+  (devuelve 429), aunque después pongan la clave correcta.
+- Los intentos rechazados de aprobar u observar quedan en el historial del
+  trámite (sin la clave).
+- El borrador lo puede descargar un abogado o el empleado cuya sesión de
+  chat es la de ese trámite. Con otra sesión devuelve 403.
 - Las descargas solo entregan archivos con el nombre que les pone el sistema
   (`T-..._borrador.docx`, `T-..._aprobado.pdf`): no se puede pedir otro archivo.
 - El empleado solo ve las respuestas del asistente, no las llamadas a
@@ -342,9 +353,10 @@ variable `OLLAMA_API_BASE`.
 
 ### Abogado: revisar y aprobar
 
-Abrir http://localhost:8080/abogado, elegir el documento pendiente, revisar
-los datos y el borrador, y aprobarlo con nombre y matrícula (o devolverlo con
-una observación). Después se descargan el Word y el PDF finales.
+Abrir http://localhost:8080/abogado, ingresar con matrícula y clave, elegir
+el documento pendiente, revisar los datos y el borrador, y aprobarlo (o
+devolverlo con una observación). Después se descargan el Word y el PDF
+finales.
 
 También se puede hacer por consola:
 
@@ -358,12 +370,16 @@ También se puede hacer por consola:
 `.\env\Scripts\adk.exe web --port 8000` abre la interfaz de ADK, que muestra
 cada llamada a herramienta. Sirve para depurar, no para los empleados.
 
-Para el prototipo, las matrículas autorizadas están en `aprobar.py`
-(por ejemplo `T.º 12 F.º 345`, Dra. Valeria Acosta). El nombre que escribe
-el abogado tiene que corresponder a la matrícula (se compara sin mayúsculas,
-acentos ni "Dr./Dra."); si no, se rechaza y queda anotado en el historial.
-En la aprobación se guarda siempre el nombre oficial de esa matrícula, no el
-que se escribió.
+Datos de prueba: matrícula `T.º 12 F.º 345` + clave `acosta2026`
+(Dra. Valeria Acosta). También está `T.º 15 F.º 210` + `ledesma2026`
+(Dr. Tomás Ledesma). Los abogados están en `campos.py`; de cada clave se
+guarda solo una sal y el hash (`pbkdf2_hmac`), nunca la clave. En `aprobar.py`
+la clave se pide con `getpass`, así no se ve al escribirla. Sin matrícula y
+clave correctas no se aprueba ni se observa, y el intento rechazado queda en
+el historial. En la aprobación se guarda el nombre oficial de esa matrícula.
+
+Estas claves son solo para el prototipo y están escritas acá a propósito. En
+un sistema real cada abogado elegiría su propia clave.
 
 ## Pruebas
 
@@ -391,8 +407,8 @@ Se usa "defensa en profundidad": varias capas, si una falla las otras siguen.
    Jinja2 con autoescape), nunca se ejecutan. La huella SHA-256 detecta
    cambios en la plantilla.
 4. **Sin permiso para aprobar**: el agente no tiene herramienta de
-   aprobación. La aprobación se hace por fuera del chat, con matrícula autorizada
-   y nombre que corresponda a esa matrícula. Si el modelo "inventa" una
+   aprobación. La aprobación se hace por fuera del chat, con matrícula y
+   clave del abogado. Si el modelo "inventa" una
    herramienta (por ejemplo `aprobar_contrato`), el conector la ignora: solo
    se ejecutan las 8 herramientas declaradas.
 5. **Confirmación obligatoria**: no se genera el borrador sin resumen previo
@@ -419,7 +435,7 @@ Se usa "defensa en profundidad": varias capas, si una falla las otras siguen.
 | RF04 Faltantes | `cargar_datos` y `ver_resumen` devuelven lo que falta, el portal lo muestra al costado y no se genera hasta tenerlo todo |
 | RF05 Generación | Plantillas del estudio con docxtpl |
 | RF06 Validación | `validacion.py` + resumen y confirmación antes de generar |
-| RF07 Aprobación | Página del abogado en el portal (o `aprobar.py`), con matrícula autorizada |
+| RF07 Aprobación | Página del abogado en el portal (o `aprobar.py`), con matrícula y clave |
 | RF08 Exportación | Descarga del borrador y del Word y PDF aprobados desde el portal |
 | Confidencialidad | Modelo local, portal solo en 127.0.0.1, registro general sin datos personales |
 | Integridad | Huella de cada plantilla, sin cláusulas nuevas |
@@ -522,10 +538,13 @@ Ya no forman parte del proyecto, pero esto es lo que mostró cada uno:
   aprobar.
 - El control de origen compara texto: si el empleado da un dato de una forma
   muy distinta (por ejemplo "4,8 millones"), se le va a pedir de nuevo.
-- No hay usuarios con contraseña: se registra el usuario de Windows y la
-  matrícula del abogado. En el portal, la página del abogado está abierta a
-  cualquiera que use esa computadora (lo que frena una aprobación es el
-  control de nombre y matrícula). En un sistema real haría falta un login.
+- Las claves de los abogados son fijas y de prueba (están en este README).
+  En un sistema real cada abogado elegiría la suya, se podría cambiar, y
+  los abogados estarían en una base de datos. El portal manda la clave en
+  cada pedido sin HTTPS: alcanza porque solo escucha en `127.0.0.1`, pero
+  si se abriera a la red haría falta HTTPS y sesiones con vencimiento.
+- El bloqueo por intentos fallidos es uno solo para todo el portal: alguien
+  que pruebe claves también deja afuera 1 minuto a los abogados.
 - Las conversaciones del portal se guardan en memoria: si se cierra el
   portal, el chat se pierde, pero el trámite no (se retoma con su número).
 - Los CUIT de los documentos de ejemplo (30-71234567-8 y 30-70987654-3) son

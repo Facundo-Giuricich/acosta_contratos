@@ -1,10 +1,15 @@
 # Pruebas del portal web (la parte que no necesita el modelo):
-# pagina del abogado, aprobar / observar desde la web y descargas.
+# ingreso del abogado, aprobar / observar desde la web, descargas y que el
+# empleado solo vea su propio tramite.
 #
 # Uso: .\env\Scripts\python.exe -m pruebas.prueba_portal
 
+import asyncio
+import base64
+
 from fastapi.testclient import TestClient
 
+import portal
 from agente_contratos import tramites
 from portal import app
 
@@ -38,6 +43,21 @@ def control(nombre, ok, detalle=""):
     print(f"  {'OK   ' if ok else 'ERROR'} {nombre} {detalle}")
 
 
+def credencial(matricula, clave):
+    texto = base64.b64encode(f"{matricula}:{clave}".encode("utf-8")).decode()
+    return {"Authorization": f"Basic {texto}"}
+
+
+ACOSTA = credencial("T.º 12 F.º 345", "acosta2026")
+LEDESMA = credencial("T.º 15 F.º 210", "ledesma2026")
+CLAVE_MAL = credencial("T.º 12 F.º 345", "otra-clave")
+SIN_CLAVE = credencial("T.º 12 F.º 345", "")
+
+
+def desbloquear():
+    portal.BLOQUEO.update(fallidos=0, hasta=0.0)
+
+
 def borrador_nuevo():
     tramite = tramites.nuevo_tramite("contrato_servicios")
     tramites.cargar_datos(tramite, DATOS_COMPLETOS)
@@ -46,52 +66,121 @@ def borrador_nuevo():
     return tramite["id"]
 
 
+def sesion_de_chat(id_tramite):
+    # una sesion de chat del empleado que esta trabajando en ese tramite
+    # (lo mismo que deja iniciar_contrato en el state, sin usar el modelo)
+    sesion = asyncio.run(portal.runner.session_service.create_session(
+        app_name=portal.APP, user_id=portal.USUARIO, state={"id_tramite": id_tramite}))
+    return sesion.id
+
+
 print("1) Páginas")
 control("página del empleado", cliente.get("/").status_code == 200)
 control("página del abogado", cliente.get("/abogado").status_code == 200)
 control("sin documentación técnica expuesta", cliente.get("/docs").status_code == 404)
 
-print("2) Revisión del abogado")
 id1 = borrador_nuevo()
-lista = cliente.get("/api/pendientes").json()
-control("el borrador aparece como pendiente", any(t["id"] == id1 for t in lista["pendientes"]))
-detalle = cliente.get(f"/api/tramite/{id1}").json()
-control("el detalle trae los datos", len(detalle["datos"]) == 21 and detalle["pendiente"])
-control("trámite inexistente -> 404", cliente.get("/api/tramite/T-20990101-000000-0000").status_code == 404)
 
-print("3) Descargas")
+print("2) Sin credenciales no se ve nada")
+control("pendientes sin credenciales -> 401", cliente.get("/api/pendientes").status_code == 401)
+control("ver un trámite sin credenciales -> 401", cliente.get(f"/api/tramite/{id1}").status_code == 401)
+r = cliente.get(f"/api/tramite/{id1}", headers=CLAVE_MAL)
+control("ver un trámite con clave incorrecta -> 401",
+        r.status_code == 401 and "Distribuidora" not in r.text)
+control("ver un trámite sin clave -> 401", cliente.get(f"/api/tramite/{id1}", headers=SIN_CLAVE).status_code == 401)
+control("credencial mal armada -> 401",
+        cliente.get("/api/pendientes", headers={"Authorization": "Basic ###"}).status_code == 401)
+desbloquear()  # (cada prueba con clave mala suma un intento fallido)
+r = cliente.post("/api/aprobar", json={"id": id1})
+control("aprobar sin credenciales -> 401", r.status_code == 401)
+r = cliente.post("/api/aprobar", json={"id": id1}, headers=SIN_CLAVE)
+control("aprobar sin clave -> 401", r.status_code == 401)
+r = cliente.post("/api/aprobar", json={"id": id1}, headers=CLAVE_MAL)
+control("aprobar con clave incorrecta -> 401", r.status_code == 401)
+r = cliente.post("/api/aprobar", json={"id": id1}, headers=credencial("T.º 12 F.º 345", "ledesma2026"))
+control("aprobar con la clave de otro abogado -> 401", r.status_code == 401)
+desbloquear()
+r = cliente.post("/api/observar", json={"id": id1, "motivo": "x"})
+control("observar sin credenciales -> 401", r.status_code == 401)
+r = cliente.post("/api/observar", json={"id": id1, "motivo": "x"}, headers=CLAVE_MAL)
+control("observar con clave incorrecta -> 401", r.status_code == 401)
+tramite = tramites.cargar_tramite(id1)
+control("sigue pendiente", tramite["estado"] == "borrador_generado")
+control("los intentos rechazados quedan en el historial",
+        sum("rechazada" in p["accion"] for p in tramite["historial"]) == 6)
+desbloquear()
+
+print("3) Bloqueo después de 5 intentos fallidos")
+for _ in range(5):
+    cliente.get("/api/pendientes", headers=CLAVE_MAL)
+r = cliente.get("/api/pendientes", headers=ACOSTA)
+control("con la clave correcta igual queda bloqueado -> 429", r.status_code == 429, f"({r.status_code})")
+desbloquear()
+control("pasado el bloqueo, entra", cliente.get("/api/pendientes", headers=ACOSTA).status_code == 200)
+for _ in range(4):
+    cliente.get("/api/pendientes", headers=CLAVE_MAL)
+cliente.get("/api/pendientes", headers=ACOSTA)
+cliente.get("/api/pendientes", headers=CLAVE_MAL)
+control("un ingreso correcto reinicia la cuenta (4 + 1 no bloquea)",
+        cliente.get("/api/pendientes", headers=ACOSTA).status_code == 200)
+desbloquear()
+
+print("4) Revisión del abogado")
+lista = cliente.get("/api/pendientes", headers=ACOSTA).json()
+control("el borrador aparece como pendiente", any(t["id"] == id1 for t in lista["pendientes"]))
+detalle = cliente.get(f"/api/tramite/{id1}", headers=ACOSTA).json()
+control("el detalle trae los datos", len(detalle["datos"]) == 21 and detalle["pendiente"])
+control("trámite inexistente -> 404",
+        cliente.get("/api/tramite/T-20990101-000000-0000", headers=ACOSTA).status_code == 404)
+
+print("5) Descargas")
 borrador = detalle["enlaces"]["borrador"]
-r = cliente.get(borrador)
-control("se descarga el borrador", r.status_code == 200 and r.content[:2] == b"PK")
+control("borrador sin credenciales ni sesión -> 401", cliente.get(borrador).status_code == 401)
+control("borrador con clave incorrecta -> 401", cliente.get(borrador, headers=CLAVE_MAL).status_code == 401)
+r = cliente.get(borrador, headers=ACOSTA)
+control("el abogado descarga el borrador", r.status_code == 200 and r.content[:2] == b"PK")
+sesion_propia = sesion_de_chat(id1)
+r = cliente.get(borrador, headers={"X-Sesion": sesion_propia})
+control("el empleado descarga el borrador de su sesión", r.status_code == 200 and r.content[:2] == b"PK")
+id_otro = borrador_nuevo()
+sesion_otra = sesion_de_chat(id_otro)
+r = cliente.get(borrador, headers={"X-Sesion": sesion_otra})
+control("un empleado descarga el borrador de otra sesión -> 403", r.status_code == 403, f"({r.status_code})")
+r = cliente.get(borrador, headers={"X-Sesion": "sesion-inventada"})
+control("con una sesión inventada -> 403", r.status_code == 403, f"({r.status_code})")
 for intento in ["/descargar/borradores/..%2F..%2Ftramites%2F" + id1 + ".json",
                 "/descargar/tramites/" + id1 + ".json",
                 "/descargar/borradores/huellas.json",
                 "/descargar/borradores/T-20990101-000000-0000_borrador.docx"]:
-    control(f"bloqueado: {intento[:60]}", cliente.get(intento).status_code == 404)
+    control(f"bloqueado: {intento[:60]}", cliente.get(intento, headers=ACOSTA).status_code == 404)
+desbloquear()
 
-print("4) Aprobar desde la web")
-r = cliente.post("/api/aprobar", json={"id": id1, "nombre": "Juan Pérez", "matricula": "T.º 12 F.º 345"}).json()
-control("nombre que no corresponde a la matrícula", not r["ok"], f"({r['mensaje']})")
-r = cliente.post("/api/aprobar", json={"id": id1, "nombre": "Valeria Acosta", "matricula": "T.º 99 F.º 1"}).json()
-control("matrícula no autorizada", not r["ok"], f"({r['mensaje']})")
-r = cliente.post("/api/aprobar", json={"id": id1, "nombre": "Dra. Valeria Acosta", "matricula": "T.º 12 F.º 345"}).json()
-control("abogado autorizado aprueba", r["ok"], f"({r['mensaje']})")
+print("6) Aprobar desde la web")
+r = cliente.post("/api/aprobar", json={"id": id1}, headers=ACOSTA).json()
+control("abogada con matrícula y clave aprueba", r["ok"], f"({r['mensaje']})")
+control("el mensaje no muestra la ruta de la computadora",
+        "\\" not in r["mensaje"] and "/" not in r["mensaje"], f"({r['mensaje']})")
+control("queda aprobado con su nombre",
+        tramites.cargar_tramite(id1)["aprobacion"]["abogado"] == "Dra. Valeria Acosta")
 control("queda el Word aprobado para descargar", "word" in r["enlaces"])
 if "word" in r["enlaces"]:
-    control("se descarga el Word aprobado", cliente.get(r["enlaces"]["word"]).status_code == 200)
-r = cliente.post("/api/aprobar", json={"id": id1, "nombre": "Dra. Valeria Acosta", "matricula": "T.º 12 F.º 345"}).json()
+    control("aprobado sin credenciales -> 401", cliente.get(r["enlaces"]["word"]).status_code == 401)
+    control("aprobado con la sesión del empleado -> 401",
+            cliente.get(r["enlaces"]["word"], headers={"X-Sesion": sesion_propia}).status_code == 401)
+    control("el abogado descarga el Word aprobado",
+            cliente.get(r["enlaces"]["word"], headers=ACOSTA).status_code == 200)
+r = cliente.post("/api/aprobar", json={"id": id1}, headers=ACOSTA).json()
 control("no se aprueba dos veces", not r["ok"])
 
-print("5) Observar desde la web")
-id2 = borrador_nuevo()
-r = cliente.post("/api/observar", json={"id": id2, "nombre": "Dr. Tomás Ledesma", "motivo": ""}).json()
+print("7) Observar desde la web")
+r = cliente.post("/api/observar", json={"id": id_otro, "motivo": ""}, headers=LEDESMA).json()
 control("sin motivo no se puede observar", not r["ok"])
-r = cliente.post("/api/observar", json={"id": id2, "nombre": "Dr. Tomás Ledesma",
-                                         "motivo": "Revisar el domicilio del prestador"}).json()
+r = cliente.post("/api/observar", json={"id": id_otro, "motivo": "Revisar el domicilio del prestador"},
+                 headers=LEDESMA).json()
 control("se devuelve con observación", r["ok"])
-control("vuelve a carga de datos", tramites.cargar_tramite(id2)["estado"] == "cargando_datos")
+control("vuelve a carga de datos", tramites.cargar_tramite(id_otro)["estado"] == "cargando_datos")
 
-print("6) Mensajes del empleado")
+print("8) Mensajes del empleado")
 control("mensaje vacío -> 400", cliente.post("/api/mensaje", json={"texto": "  "}).status_code == 400)
 control("mensaje gigante -> 400", cliente.post("/api/mensaje", json={"texto": "a" * 5000}).status_code == 400)
 

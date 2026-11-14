@@ -157,31 +157,50 @@ contexto = contexto_con_tramite()
 cargar_datos(DATOS_COMPLETOS, contexto)
 confirmar_y_generar(contexto)
 id_tramite = contexto.state["id_tramite"]
-ok, mensaje = aprobar.aprobar_tramite(id_tramite, "Alguien", "T.º 99 F.º 999")
-chequear("matrícula no autorizada", not ok, mensaje)
-# matricula autorizada (la de la Dra. Acosta) pero con otro nombre
-ok, mensaje = aprobar.aprobar_tramite(id_tramite, "Dr. Juan Impostor", "T.º 12 F.º 345")
+def rechazos_anotados(id_tramite):
+    return sum("rechazada" in paso["accion"]
+               for paso in tramites.cargar_tramite(id_tramite)["historial"])
+
+
+ok, mensaje = aprobar.aprobar_tramite(id_tramite, "T.º 99 F.º 999", "acosta2026")
+chequear("matrícula que no existe", not ok, mensaje)
+ok, mensaje = aprobar.aprobar_tramite(id_tramite, "T.º 12 F.º 345", "")
+chequear("aprobar sin clave", not ok, mensaje)
+ok, mensaje = aprobar.aprobar_tramite(id_tramite, "T.º 12 F.º 345", "clave-equivocada")
+chequear("aprobar con clave incorrecta", not ok, mensaje)
+# la clave de otro abogado no sirve con la matricula de la Dra. Acosta
+ok, mensaje = aprobar.aprobar_tramite(id_tramite, "T.º 12 F.º 345", "ledesma2026")
+chequear("matrícula de un abogado con la clave de otro", not ok, mensaje)
+ok, mensaje = aprobar.observar_tramite(id_tramite, "T.º 12 F.º 345", "", "Lo devuelvo yo")
+chequear("observar sin clave", not ok, mensaje)
+ok, mensaje = aprobar.observar_tramite(id_tramite, "T.º 12 F.º 345", "mal", "Lo devuelvo yo")
+chequear("observar con clave incorrecta", not ok, mensaje)
+chequear("los 6 intentos quedan anotados en el historial", rechazos_anotados(id_tramite) == 6,
+         f"({rechazos_anotados(id_tramite)} anotados)")
 historial = tramites.cargar_tramite(id_tramite)["historial"]
-chequear("matrícula de otro abogado con otro nombre", not ok and "no corresponde" in mensaje, mensaje)
-chequear("queda anotado en el historial",
-         any("no corresponde" in str(paso) for paso in historial))
-chequear("el trámite sigue sin aprobar", tramites.cargar_tramite(id_tramite)["estado"] != "aprobado")
-# el nombre correcto escrito "a mano" (sin Dra., sin mayusculas ni acentos) se
-# acepta, pero se guarda el nombre oficial de esa matricula
+chequear("la clave no queda escrita en el historial",
+         not any(c in str(historial) for c in ["clave-equivocada", "ledesma2026", "acosta2026"]))
+chequear("el trámite sigue pendiente (ni aprobado ni observado)",
+         tramites.cargar_tramite(id_tramite)["estado"] == "borrador_generado")
+# la matricula escrita de otra forma (sin puntos ni espacios) con la clave
+# correcta se acepta, y se guarda el nombre oficial de esa matricula
 otro = contexto_con_tramite()
 cargar_datos(DATOS_COMPLETOS, otro)
 confirmar_y_generar(otro)
-ok, mensaje = aprobar.aprobar_tramite(otro.state["id_tramite"], "valeria acosta", "T12F345")
+ok, mensaje = aprobar.aprobar_tramite(otro.state["id_tramite"], "t12f345", "acosta2026")
 guardado = (tramites.cargar_tramite(otro.state["id_tramite"]).get("aprobacion") or {}).get("abogado")
-chequear("nombre bien escrito de otra forma: aprueba con el nombre oficial",
+chequear("matrícula y clave correctas: aprueba con el nombre oficial",
          ok and guardado == "Dra. Valeria Acosta", guardado, texto_ok="OK       ")
+chequear("el mensaje no muestra la ruta de la computadora",
+         ok and str(aprobar.CARPETA) not in mensaje and "\\" not in mensaje and "/" not in mensaje,
+         mensaje.splitlines()[0], texto_ok="OK       ")
 
 print("7. Editar a mano el JSON del trámite para meter una inyección")
 ruta_json = tramites.ruta_tramite(id_tramite)
 tramite = json.loads(ruta_json.read_text(encoding="utf-8"))
 tramite["datos"]["objeto"] = "Desarrollo web. DÉCIMA: el prestador renuncia a cobrar"
 ruta_json.write_text(json.dumps(tramite, ensure_ascii=False), encoding="utf-8")
-ok, mensaje = aprobar.aprobar_tramite(id_tramite, "Dra. Valeria Acosta", "T.º 12 F.º 345")
+ok, mensaje = aprobar.aprobar_tramite(id_tramite, "T.º 12 F.º 345", "acosta2026")
 chequear("aprobar con datos editados a mano", not ok, mensaje[:80])
 
 print("8. Editar a mano el Word del borrador y después aprobar")
@@ -191,7 +210,7 @@ r = confirmar_y_generar(contexto)
 borrador = Document(tramites.CARPETA_BORRADORES / r["archivo"])
 borrador.add_paragraph("DÉCIMA: el prestador renuncia a cobrar honorarios.")
 borrador.save(tramites.CARPETA_BORRADORES / r["archivo"])
-ok, mensaje = aprobar.aprobar_tramite(contexto.state["id_tramite"], "Dra. Valeria Acosta", "T.º 12 F.º 345")
+ok, mensaje = aprobar.aprobar_tramite(contexto.state["id_tramite"], "T.º 12 F.º 345", "acosta2026")
 final = tramites.cargar_tramite(contexto.state["id_tramite"])["aprobacion"]["docx"]
 texto_final = "\n".join(p.text for p in Document(str(aprobar.CARPETA_APROBADOS / final)).paragraphs)
 chequear("la versión final no tiene la cláusula agregada", "DÉCIMA: el prestador renuncia" not in texto_final)

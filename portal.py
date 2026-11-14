@@ -1,12 +1,14 @@
 # Portal web del estudio: una interfaz simple para empleados y abogados.
 #
 #   /         -> el empleado chatea con el asistente y descarga el borrador
-#   /abogado  -> el abogado revisa los borradores pendientes, los aprueba u
-#                observa, y descarga la version final en Word y PDF
+#                de SU trámite (el de su sesión de chat)
+#   /abogado  -> el abogado entra con matrícula y clave, revisa los borradores
+#                pendientes, los aprueba u observa, y descarga la version final
+#                en Word y PDF
 #
 # Es lo mismo que adk web + aprobar.py, pero sin pantallas tecnicas.
 # El agente sigue sin poder aprobar: la aprobacion es un formulario aparte
-# que pide nombre y matricula y usa las mismas funciones que aprobar.py.
+# que pide matricula y clave y usa las mismas funciones que aprobar.py.
 #
 # Uso (con Ollama abierto):
 #   .\env\Scripts\python.exe portal.py
@@ -15,23 +17,28 @@
 # Solo escucha en 127.0.0.1 (esta computadora): los datos de los clientes no
 # quedan expuestos en la red.
 
+import base64
+import binascii
 import os
 import re
+import threading
+import time
 from pathlib import Path
 
 os.environ.setdefault("OLLAMA_API_BASE", "http://localhost:11434")
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 import aprobar
 from agente_contratos import tramites
 from agente_contratos.agent import root_agent
-from agente_contratos.campos import CONTRATOS
+from agente_contratos.campos import CONTRATOS, verificar_abogado
 
 CARPETA = Path(__file__).resolve().parent
 CARPETA_WEB = CARPETA / "web"
@@ -44,6 +51,84 @@ USUARIO = "empleado"
 
 app = FastAPI(title="Acosta & Asociados", docs_url=None, redoc_url=None)
 runner = InMemoryRunner(agent=root_agent, app_name=APP)
+
+
+# ---------------------------------------------------------------- credenciales
+#
+# La pagina del abogado manda en cada pedido el encabezado
+#   Authorization: Basic base64("matricula:clave")
+# (la pagina la guarda solo en memoria, no en localStorage).
+# Despues de 5 intentos fallidos seguidos se bloquea todo 1 minuto, aunque
+# despues pongan la clave correcta (asi no se puede probar claves sin parar).
+
+INTENTOS_MAXIMOS = 5
+SEGUNDOS_BLOQUEO = 60
+BLOQUEO = {"fallidos": 0, "hasta": 0.0}
+_candado = threading.Lock()
+
+
+def leer_credenciales(authorization):
+    # "Basic xxxx" -> (matricula, clave), o None si no viene bien armado
+    if not authorization:
+        return None
+    esquema, _, valor = authorization.partition(" ")
+    if esquema.lower() != "basic":
+        return None
+    try:
+        texto = base64.b64decode(valor.strip(), validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    matricula, separador, clave = texto.partition(":")
+    if not separador:
+        return None
+    return matricula, clave
+
+
+def exigir_abogado(authorization):
+    # devuelve (matricula, clave) si son correctas; si no, 401 (o 429 si
+    # esta bloqueado por demasiados intentos)
+    if not authorization:
+        raise HTTPException(401, "Faltan la matrícula y la clave.")
+    with _candado:
+        if time.monotonic() < BLOQUEO["hasta"]:
+            raise HTTPException(429, "Demasiados intentos fallidos. Esperá un minuto y probá de nuevo.")
+
+    credenciales = leer_credenciales(authorization)
+    correcto = credenciales is not None and verificar_abogado(*credenciales) is not None
+
+    with _candado:
+        if correcto:
+            BLOQUEO["fallidos"] = 0
+        else:
+            BLOQUEO["fallidos"] += 1
+            if BLOQUEO["fallidos"] >= INTENTOS_MAXIMOS:
+                BLOQUEO["fallidos"] = 0
+                BLOQUEO["hasta"] = time.monotonic() + SEGUNDOS_BLOQUEO
+    if not correcto:
+        raise HTTPException(401, aprobar.MENSAJE_CREDENCIALES)
+    return credenciales
+
+
+def exigir_abogado_para(authorization, id_tramite, accion):
+    # igual que exigir_abogado, pero si lo rechaza deja anotado el intento
+    # en el historial del tramite
+    try:
+        return exigir_abogado(authorization)
+    except HTTPException as error:
+        tramite = tramites.cargar_tramite(id_tramite)
+        if tramite:
+            tramites.anotar(tramite, f"{accion} rechazada", f"desde el portal: {error.detail}")
+            tramites.guardar_tramite(tramite)
+        raise
+
+
+async def tramite_de_la_sesion(id_sesion):
+    # el tramite en el que esta trabajando esa sesion de chat (o None)
+    if not id_sesion:
+        return None
+    sesion = await runner.session_service.get_session(
+        app_name=APP, user_id=USUARIO, session_id=id_sesion)
+    return sesion.state.get("id_tramite") if sesion else None
 
 
 # ---------------------------------------------------------------- paginas
@@ -60,27 +145,54 @@ def pagina_abogado():
 
 # ---------------------------------------------------------------- descargas
 
-@app.get("/descargar/{carpeta}/{archivo}")
-def descargar(carpeta: str, archivo: str):
+def ruta_descarga(carpeta, archivo):
     # solo archivos generados por el sistema, con el nombre que les pone el
     # sistema (asi nadie puede pedir "../../tramites/..." u otro archivo)
     if carpeta not in CARPETAS_DESCARGA:
         raise HTTPException(404)
     if not re.fullmatch(r"T-\d{8}-\d{6}-[0-9a-f]{4}_(borrador|aprobado)\.(docx|pdf)", archivo):
         raise HTTPException(404)
-    ruta = CARPETAS_DESCARGA[carpeta] / archivo
+    return CARPETAS_DESCARGA[carpeta] / archivo
+
+
+def enviar_archivo(ruta):
     if not ruta.exists():
         raise HTTPException(404)
-    return FileResponse(ruta, filename=archivo)
+    return FileResponse(ruta, filename=ruta.name)
 
 
-def enlaces(tramite):
-    # links de descarga que corresponden al estado del tramite
+@app.get("/descargar/borradores/{archivo}")
+async def descargar_borrador(archivo: str, authorization: str | None = Header(None),
+                             x_sesion: str | None = Header(None)):
+    # lo puede bajar un abogado (con matricula y clave) o el empleado cuya
+    # sesion de chat es la de ese tramite
+    ruta = ruta_descarga("borradores", archivo)
+    if authorization:
+        await run_in_threadpool(exigir_abogado, authorization)
+    elif x_sesion:
+        id_tramite = archivo.split("_")[0]
+        if await tramite_de_la_sesion(x_sesion) != id_tramite:
+            raise HTTPException(403, "Ese borrador no es de tu trámite.")
+    else:
+        raise HTTPException(401, "Falta identificarse.")
+    return enviar_archivo(ruta)
+
+
+@app.get("/descargar/aprobados/{archivo}")
+def descargar_aprobado(archivo: str, authorization: str | None = Header(None)):
+    ruta = ruta_descarga("aprobados", archivo)
+    exigir_abogado(authorization)
+    return enviar_archivo(ruta)
+
+
+def enlaces(tramite, abogado):
+    # links de descarga que corresponden al estado del tramite.
+    # Los aprobados solo los baja el abogado
     resultado = {}
     if tramite.get("borrador"):
         resultado["borrador"] = f"/descargar/borradores/{tramite['borrador']['archivo']}"
     aprobacion = tramite.get("aprobacion")
-    if tramite["estado"] == "aprobado" and aprobacion:
+    if abogado and tramite["estado"] == "aprobado" and aprobacion:
         resultado["word"] = f"/descargar/aprobados/{aprobacion['docx']}"
         if aprobacion.get("pdf"):
             resultado["pdf"] = f"/descargar/aprobados/{aprobacion['pdf']}"
@@ -103,12 +215,13 @@ def resumen_tramite(tramite):
         "id": tramite["id"],
         "documento": info["nombre"],
         "estado": ESTADOS.get(tramite["estado"], tramite["estado"]),
+        "aprobado": tramite["estado"] == "aprobado",
         "cargados": len(cargados),
         "obligatorios": len(obligatorios),
         # los faltantes vienen como "campo (descripcion)": muestro la descripcion
         "faltan": [re.sub(r"^\w+ \((.*)\)$", r"\1", f) for f in revision["faltantes"]],
         "observaciones": tramite.get("observaciones"),
-        "enlaces": enlaces(tramite),
+        "enlaces": enlaces(tramite, abogado=False),
     }
 
 
@@ -156,9 +269,9 @@ async def mensaje(pedido: Mensaje):
     if not respuestas:
         respuestas.append("Perdón, no pude procesar eso. ¿Me lo repetís?")
 
-    sesion = await servicio.get_session(app_name=APP, user_id=USUARIO, session_id=sesion.id)
+    # solo se devuelve el tramite de esta sesion
     tramite = None
-    id_tramite = sesion.state.get("id_tramite") if sesion else None
+    id_tramite = await tramite_de_la_sesion(sesion.id)
     if id_tramite:
         datos = tramites.cargar_tramite(id_tramite)
         if datos:
@@ -179,7 +292,9 @@ def tramites_con_estado(estado):
 
 
 @app.get("/api/pendientes")
-def pendientes():
+def pendientes(authorization: str | None = Header(None)):
+    exigir_abogado(authorization)
+
     def fila(t):
         return {
             "id": t["id"],
@@ -188,7 +303,7 @@ def pendientes():
             "fecha": (t.get("borrador") or {}).get("fecha")
                      or (t.get("aprobacion") or {}).get("fecha"),
             "aprobado_por": (t.get("aprobacion") or {}).get("abogado"),
-            "enlaces": enlaces(t),
+            "enlaces": enlaces(t, abogado=True),
         }
     return {
         "pendientes": [fila(t) for t in tramites_con_estado("borrador_generado")],
@@ -197,7 +312,8 @@ def pendientes():
 
 
 @app.get("/api/tramite/{id_tramite}")
-def ver_tramite(id_tramite: str):
+def ver_tramite(id_tramite: str, authorization: str | None = Header(None)):
+    exigir_abogado(authorization)
     tramite = tramites.cargar_tramite(id_tramite)
     if tramite is None:
         raise HTTPException(404, "No existe ese trámite.")
@@ -213,37 +329,34 @@ def ver_tramite(id_tramite: str):
         "datos": [{"dato": campos[c][1], "valor": str(v)} for c, v in tramite["datos"].items()],
         "advertencias": revision["advertencias"],
         "historial": tramite["historial"][-15:],
-        "enlaces": enlaces(tramite),
+        "enlaces": enlaces(tramite, abogado=True),
     }
 
 
 class Aprobacion(BaseModel):
     id: str
-    nombre: str
-    matricula: str
 
 
 class Observacion(BaseModel):
     id: str
-    nombre: str
     motivo: str
 
 
 @app.post("/api/aprobar")
-def aprobar_desde_web(pedido: Aprobacion):
-    # las mismas validaciones que aprobar.py (matricula autorizada, nombre
-    # que corresponda, datos revalidados, version final desde los datos)
-    ok, mensaje = aprobar.aprobar_tramite(pedido.id, pedido.nombre, pedido.matricula)
+def aprobar_desde_web(pedido: Aprobacion, authorization: str | None = Header(None)):
+    # las mismas validaciones que aprobar.py (matricula y clave, datos
+    # revalidados, version final desde los datos)
+    matricula, clave = exigir_abogado_para(authorization, pedido.id, "aprobacion")
+    ok, mensaje = aprobar.aprobar_tramite(pedido.id, matricula, clave)
     tramite = tramites.cargar_tramite(pedido.id)
     return {"ok": ok, "mensaje": mensaje.splitlines()[0],
-            "enlaces": enlaces(tramite) if tramite else {}}
+            "enlaces": enlaces(tramite, abogado=True) if tramite else {}}
 
 
 @app.post("/api/observar")
-def observar_desde_web(pedido: Observacion):
-    if not pedido.nombre.strip():
-        return {"ok": False, "mensaje": "Falta el nombre del abogado."}
-    ok, mensaje = aprobar.observar_tramite(pedido.id, pedido.nombre, pedido.motivo)
+def observar_desde_web(pedido: Observacion, authorization: str | None = Header(None)):
+    matricula, clave = exigir_abogado_para(authorization, pedido.id, "observacion")
+    ok, mensaje = aprobar.observar_tramite(pedido.id, matricula, clave, pedido.motivo)
     return {"ok": ok, "mensaje": mensaje}
 
 

@@ -56,6 +56,12 @@
   button.secundario { background: transparent; color: var(--texto); border: 1px solid var(--borde); }
   button:disabled { opacity: .5; cursor: wait; }
   .historial { font-size: 13px; color: var(--suave); padding-left: 18px; }
+  #ingreso { max-width: 380px; margin: 48px auto; }
+  #ingreso p { color: var(--suave); font-size: 14px; margin: 0 0 8px; }
+  .usuario { display: flex; align-items: baseline; gap: 10px; }
+  .usuario button { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--borde);
+                    background: transparent; color: var(--texto); font: inherit; font-size: 14px; cursor: pointer; }
+  [hidden] { display: none !important; }
   @media (max-width: 800px) {
     main, .acciones { grid-template-columns: 1fr; }
   }
@@ -64,9 +70,20 @@
 <body>
 <header>
   <h1>Acosta &amp; Asociados</h1>
-  <span>Revisión y aprobación de documentos (abogados)</span>
+  <span class="usuario">Revisión y aprobación de documentos (abogados)
+    <button id="b-salir" type="button" hidden>Salir</button></span>
 </header>
-<main>
+<section id="ingreso">
+  <h2>Ingresar</h2>
+  <p>Solo para abogados del estudio.</p>
+  <form id="f-ingreso">
+    <label>Matrícula (ej: T.º 12 F.º 345)<input id="i-matricula" autocomplete="username" required></label>
+    <label>Clave<input id="i-clave" type="password" autocomplete="current-password" required></label>
+    <div id="ingreso-error"></div>
+    <button class="accion" id="b-ingresar" type="submit">Ingresar</button>
+  </form>
+</section>
+<main id="principal" hidden>
   <section>
     <h2>Pendientes de aprobación</h2>
     <div id="pendientes"><p class="vacio">Cargando…</p></div>
@@ -82,16 +99,100 @@
     return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
 
+  // Matrícula y clave: solo en esta variable (memoria de la página). No se
+  // guardan en localStorage ni en cookies: al recargar o cerrar, hay que
+  // volver a ingresar.
+  let credencial = null;
+
+  function armarCredencial(matricula, clave) {
+    // "Basic " + base64 de "matricula:clave" en UTF-8 (la matrícula lleva "º")
+    const bytes = new TextEncoder().encode(matricula + ":" + clave);
+    let binario = "";
+    bytes.forEach(b => binario += String.fromCharCode(b));
+    return "Basic " + btoa(binario);
+  }
+
+  class SinAcceso extends Error {}
+
+  // todos los pedidos del abogado pasan por acá y llevan las credenciales
+  async function api(url, opciones = {}) {
+    const r = await fetch(url, {
+      ...opciones,
+      headers: {...(opciones.headers || {}), "Authorization": credencial || ""},
+    });
+    if (r.status === 401 || r.status === 429) {
+      const datos = await r.json().catch(() => ({}));
+      salir(datos.detail || "Matrícula o clave incorrecta.");
+      throw new SinAcceso();
+    }
+    return r;
+  }
+
+  function salir(mensaje) {
+    credencial = null;
+    document.getElementById("principal").hidden = true;
+    document.getElementById("b-salir").hidden = true;
+    document.getElementById("ingreso").hidden = false;
+    document.getElementById("detalle").innerHTML =
+      `<p class="vacio">Elegí un documento de la lista para revisarlo.</p>`;
+    document.getElementById("i-clave").value = "";
+    document.getElementById("ingreso-error").innerHTML =
+      mensaje ? `<div class="error">${escapar(mensaje)}</div>` : "";
+  }
+
+  async function ingresar(e) {
+    e.preventDefault();
+    const boton = document.getElementById("b-ingresar");
+    credencial = armarCredencial(document.getElementById("i-matricula").value.trim(),
+                                 document.getElementById("i-clave").value);
+    document.getElementById("i-clave").value = "";
+    document.getElementById("ingreso-error").innerHTML = "";
+    boton.disabled = true;
+    try {
+      await cargarLista();
+      document.getElementById("ingreso").hidden = true;
+      document.getElementById("principal").hidden = false;
+      document.getElementById("b-salir").hidden = false;
+    } catch (error) {
+      if (!(error instanceof SinAcceso)) salir("No me pude conectar con el sistema.");
+    } finally {
+      boton.disabled = false;
+    }
+  }
+
+  // las descargas también llevan las credenciales, así que no pueden ser
+  // links comunes: se pide el archivo y se guarda desde la página
+  async function descargar(url) {
+    try {
+      const r = await api(url);
+      if (!r.ok) { alert("No se encontró el archivo."); return; }
+      const enlace = document.createElement("a");
+      enlace.href = URL.createObjectURL(await r.blob());
+      enlace.download = url.split("/").pop();
+      document.body.appendChild(enlace);
+      enlace.click();
+      enlace.remove();
+      setTimeout(() => URL.revokeObjectURL(enlace.href), 10000);
+    } catch (error) {
+      if (!(error instanceof SinAcceso)) alert("No me pude conectar con el sistema.");
+    }
+  }
+
   function enlacesHtml(e) {
     let html = "";
-    if (e.borrador) html += `<a class="enlace" href="${e.borrador}">Borrador (Word)</a>`;
-    if (e.word) html += `<a class="enlace" href="${e.word}">Aprobado (Word)</a>`;
-    if (e.pdf) html += `<a class="enlace" href="${e.pdf}">Aprobado (PDF)</a>`;
+    if (e.borrador) html += `<a class="enlace" href="#" data-descarga="${escapar(e.borrador)}">Borrador (Word)</a>`;
+    if (e.word) html += `<a class="enlace" href="#" data-descarga="${escapar(e.word)}">Aprobado (Word)</a>`;
+    if (e.pdf) html += `<a class="enlace" href="#" data-descarga="${escapar(e.pdf)}">Aprobado (PDF)</a>`;
     return html;
   }
 
+  document.addEventListener("click", e => {
+    const enlace = e.target.closest("[data-descarga]");
+    if (enlace) { e.preventDefault(); descargar(enlace.dataset.descarga); }
+  });
+
   async function cargarLista() {
-    const r = await fetch("/api/pendientes");
+    const r = await api("/api/pendientes");
     const datos = await r.json();
     const fila = t => `<button class="item" data-id="${escapar(t.id)}">
         <b>${escapar(t.cliente)}</b><small>${escapar(t.documento)}</small>
@@ -101,12 +202,13 @@
       ? datos.pendientes.map(fila).join("") : `<p class="vacio">No hay documentos pendientes.</p>`;
     document.getElementById("aprobados").innerHTML = datos.aprobados.length
       ? datos.aprobados.map(fila).join("") : `<p class="vacio">Todavía no hay documentos aprobados.</p>`;
-    document.querySelectorAll(".item").forEach(b => b.addEventListener("click", () => abrir(b.dataset.id)));
+    document.querySelectorAll(".item").forEach(b => b.addEventListener("click",
+      () => abrir(b.dataset.id).catch(() => {})));
   }
 
   async function abrir(id) {
     document.querySelectorAll(".item").forEach(b => b.classList.toggle("activo", b.dataset.id === id));
-    const r = await fetch("/api/tramite/" + encodeURIComponent(id));
+    const r = await api("/api/tramite/" + encodeURIComponent(id));
     const t = await r.json();
     let html = `<h2>${escapar(t.documento)}</h2>
       <p style="color:var(--suave);margin:0 0 10px">N.º ${escapar(t.id)} · ${escapar(t.estado)} ·
@@ -124,13 +226,12 @@
         <div class="acciones">
           <fieldset>
             <legend>Aprobar</legend>
-            <label>Nombre del abogado<input id="a-nombre" autocomplete="name"></label>
-            <label>Matrícula (ej: T.º 12 F.º 345)<input id="a-matricula"></label>
+            <p style="font-size:14px;color:var(--suave);margin:4px 0">Queda aprobado con tu nombre
+              y matrícula.</p>
             <button class="accion" id="b-aprobar">Aprobar y generar Word y PDF</button>
           </fieldset>
           <fieldset>
             <legend>Devolver con observación</legend>
-            <label>Nombre del abogado<input id="o-nombre" autocomplete="name"></label>
             <label>Motivo<textarea id="o-motivo"></textarea></label>
             <button class="accion secundario" id="b-observar">Devolver al empleado</button>
           </fieldset>
@@ -148,13 +249,13 @@
 
   async function decidir(id, accion) {
     const cuerpo = accion === "aprobar"
-      ? {id, nombre: document.getElementById("a-nombre").value, matricula: document.getElementById("a-matricula").value}
-      : {id, nombre: document.getElementById("o-nombre").value, motivo: document.getElementById("o-motivo").value};
+      ? {id}
+      : {id, motivo: document.getElementById("o-motivo").value};
     document.querySelectorAll("button.accion").forEach(b => b.disabled = true);
     const resultado = document.getElementById("resultado");
     resultado.innerHTML = `<div class="aviso">Procesando… (generar el PDF puede tardar unos segundos)</div>`;
     try {
-      const r = await fetch("/api/" + accion, {
+      const r = await api("/api/" + accion, {
         method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cuerpo),
       });
       const datos = await r.json();
@@ -168,12 +269,15 @@
         document.querySelectorAll("button.accion").forEach(b => b.disabled = false);
       }
     } catch (error) {
+      if (error instanceof SinAcceso) return;
       resultado.innerHTML = `<div class="error">No me pude conectar con el sistema.</div>`;
       document.querySelectorAll("button.accion").forEach(b => b.disabled = false);
     }
   }
 
-  cargarLista();
+  document.getElementById("f-ingreso").addEventListener("submit", ingresar);
+  document.getElementById("b-salir").addEventListener("click", () => salir());
+  document.getElementById("i-matricula").focus();
 </script>
 </body>
 </html>

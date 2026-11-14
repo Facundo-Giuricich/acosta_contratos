@@ -166,7 +166,7 @@ if ruta:
             Document(str(ruta)).paragraphs[0].text.startswith("BORRADOR"))
 
 import aprobar  # noqa: E402  (aca recien, para no mezclar la salida)
-ok, mensaje = aprobar.aprobar_tramite(tramite["id"], "Valeria Acosta", "T.º 12 F.º 345")
+ok, mensaje = aprobar.aprobar_tramite(tramite["id"], "T.º 12 F.º 345", "acosta2026")
 control("lo aprueba un abogado autorizado", ok, mensaje.splitlines()[0])
 control("el listado muestra al cliente",
         aprobar.nombre_del_tramite(tramites.cargar_tramite(tramite["id"]))
